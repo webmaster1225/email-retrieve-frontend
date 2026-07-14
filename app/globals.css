@@ -470,6 +470,58 @@ tr:hover td {
   line-height: 1.4;
 }
 
+.drawer-email-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drawer-email-item {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e8ecf1;
+}
+
+.drawer-email-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.drawer-email-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.drawer-email-date {
+  color: #5b6475;
+  font-size: 0.8rem;
+}
+
+.chip.direction {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.chip.direction.inbound {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+  border: 1px solid rgba(22, 163, 74, 0.2);
+}
+
+.chip.direction.outbound {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+.chip.direction.unknown {
+  background: rgba(91, 100, 117, 0.12);
+  color: #5b6475;
+  border: 1px solid rgba(91, 100, 117, 0.2);
+}
+
 .chip.usefulness.high {
   background: rgba(22, 163, 74, 0.12);
   color: #15803d;

@@ -3,16 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  Contact,
+  ExchangeEmail,
   formatDate,
   OutlookContact,
   RelationshipAnalysis,
   RelationshipResult,
   reviewClass,
   SeniorityResult,
+  Stats,
+  SyncRun,
   tierClass,
 } from "@/lib/api";
 import { InfoTip } from "@/components/InfoTip";
 import { Nav } from "@/components/Nav";
+import {
+  clearContactCache,
+  loadContactCache,
+  saveContactCache,
+} from "@/lib/contactCache";
 import { RelevanceTierHelp } from "@/lib/helpText";
 
 const PAGE_SIZE = 50;
@@ -44,21 +53,62 @@ function usefulnessEntries(analysis: RelationshipAnalysis | null | undefined) {
   );
 }
 
+function directionLabel(direction: string) {
+  if (direction === "inbound") return "Received";
+  if (direction === "outbound") return "Sent";
+  return "Unknown";
+}
+
+function contactToRow(contact: Contact): OutlookContact {
+  return {
+    id: contact.id,
+    local_contact_id: contact.id,
+    list_number: contact.list_number,
+    full_name: contact.full_name,
+    primary_email: contact.primary_email,
+    company_name: contact.company_name,
+    company_domain: contact.company_domain,
+    last_contacted_at: contact.last_contacted_at,
+    last_subject: contact.last_subject,
+    last_preview: contact.last_preview,
+    latest_message_id: contact.latest_message_id,
+    latest_outlook_weblink: contact.latest_outlook_weblink,
+    email_count: contact.email_count,
+    thread_count: contact.thread_count,
+    fundraising_relevance_score: contact.fundraising_relevance_score,
+    fundraising_relevance_tier: contact.fundraising_relevance_tier,
+    review_status: contact.review_status,
+    detected_topics: contact.detected_topics,
+    detected_role: contact.detected_role,
+    ai_seniority: contact.ai_seniority,
+  };
+}
+
+function currentFilters(q: string, fundraisingTier: string, emailCountMin: string, reviewFilter: string) {
+  return { q, fundraisingTier, emailCountMin, reviewFilter };
+}
+
 export default function HomePage() {
   const [auth, setAuth] = useState<{ connected: boolean; user_email: string | null } | null>(null);
   const [contacts, setContacts] = useState<OutlookContact[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [nextLink, setNextLink] = useState<string | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [sync, setSync] = useState<SyncRun | null>(null);
+  const [dataSource, setDataSource] = useState<"local" | "outlook">("outlook");
   const [selected, setSelected] = useState<OutlookContact | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [seniority, setSeniority] = useState<SeniorityResult | null>(null);
   const [seniorityLoading, setSeniorityLoading] = useState(false);
   const [relationship, setRelationship] = useState<RelationshipResult | null>(null);
   const [relationshipLoading, setRelationshipLoading] = useState(false);
+  const [recentEmails, setRecentEmails] = useState<ExchangeEmail[]>([]);
+  const [recentEmailsLoading, setRecentEmailsLoading] = useState(false);
 
   const [q, setQ] = useState("");
   const [fundraisingTier, setFundraisingTier] = useState("");
@@ -69,6 +119,9 @@ export default function HomePage() {
   const sentinelRef = useRef<HTMLTableRowElement>(null);
   const loadGenRef = useRef(0);
   const contactsRef = useRef<OutlookContact[]>([]);
+  const pageRef = useRef(1);
+  const useLocalRef = useRef(false);
+  const loadedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     contactsRef.current = contacts;
@@ -100,38 +153,90 @@ export default function HomePage() {
     }
   }, []);
 
-  const refreshStats = useCallback(async () => {
+  const refreshStats = useCallback(async (includeGraphTotal = false) => {
     try {
-      const statsData = await api.stats();
-      if (statsData.graph_sent_total != null) {
+      const statsData = await api.stats(includeGraphTotal);
+      setStats(statsData);
+      if (statsData.external_contacts > 0) {
+        setTotal(statsData.external_contacts);
+      } else if (statsData.graph_sent_total != null) {
         setTotal(statsData.graph_sent_total);
       }
+      return statsData;
     } catch {
       // Non-blocking — stats are optional for the table.
+      return null;
     }
   }, []);
 
+  const persistCache = useCallback(
+    (items: OutlookContact[], page: number, source: "local" | "outlook", totalCount: number | null) => {
+      saveContactCache({
+        contacts: items,
+        page,
+        total: totalCount,
+        source,
+        filters: currentFilters(q, fundraisingTier, emailCountMin, reviewFilter),
+        userEmail: auth?.user_email ?? null,
+      });
+    },
+    [auth?.user_email, q, fundraisingTier, emailCountMin, reviewFilter]
+  );
+
   const loadContactsPage = useCallback(
-    async (cursor: string | null, append: boolean) => {
+    async (cursor: string | null, append: boolean, useLocal = useLocalRef.current) => {
       const gen = loadGenRef.current;
       if (append) setLoadingMore(true);
       else setLoading(true);
       setError(null);
       try {
-        const excludeEmails = append
-          ? contactsRef.current.map((c) => c.primary_email).join(",")
-          : undefined;
-        const contactData = await api.outlookContacts({
-          page_size: PAGE_SIZE,
-          next_link: cursor || undefined,
-          q: q || undefined,
-          exclude_emails: excludeEmails,
-          include_total: false,
-        });
-        if (gen !== loadGenRef.current) return;
-        setContacts((prev) => (append ? [...prev, ...contactData.items] : contactData.items));
-        setNextLink(contactData.next_link);
-        if (contactData.total != null) setTotal(contactData.total);
+        if (useLocal) {
+          const page = append ? pageRef.current + 1 : 1;
+          pageRef.current = page;
+          const params: Record<string, string | number | boolean> = {
+            page,
+            page_size: PAGE_SIZE,
+            exclude_internal: true,
+            exclude_noise: true,
+            sort: "last_contacted_at",
+            order: "desc",
+          };
+          if (q) params.q = q;
+          if (fundraisingTier) params.fundraising_tier = fundraisingTier;
+          if (emailCountMin.trim()) params.email_count_min = Number(emailCountMin);
+          if (reviewFilter) params.review_status = reviewFilter;
+
+          const contactData = await api.contacts(params);
+          if (gen !== loadGenRef.current) return;
+
+          const rows = contactData.items.map(contactToRow);
+          const merged = append ? [...contactsRef.current, ...rows] : rows;
+          setContacts(merged);
+          setDataSource("local");
+          setTotal(contactData.total);
+          setNextLink(page * PAGE_SIZE < contactData.total ? `local:${page + 1}` : null);
+          persistCache(merged, page, "local", contactData.total);
+        } else {
+          const excludeEmails = append
+            ? contactsRef.current.map((c) => c.primary_email).join(",")
+            : undefined;
+          const contactData = await api.outlookContacts({
+            page_size: PAGE_SIZE,
+            next_link: cursor || undefined,
+            q: q || undefined,
+            exclude_emails: excludeEmails,
+            include_total: false,
+            prefer_local: false,
+          });
+          if (gen !== loadGenRef.current) return;
+
+          const merged = append ? [...contactsRef.current, ...contactData.items] : contactData.items;
+          setContacts(merged);
+          setDataSource("outlook");
+          setNextLink(contactData.next_link);
+          if (contactData.total != null) setTotal(contactData.total);
+          persistCache(merged, append ? pageRef.current + 1 : 1, "outlook", contactData.total);
+        }
       } catch (err) {
         if (gen !== loadGenRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load contacts");
@@ -141,7 +246,7 @@ export default function HomePage() {
         setLoadingMore(false);
       }
     },
-    [q]
+    [q, fundraisingTier, emailCountMin, reviewFilter, persistCache]
   );
 
   useEffect(() => {
@@ -149,9 +254,9 @@ export default function HomePage() {
   }, [refreshAuth]);
 
   useEffect(() => {
-    if (auth?.connected) {
-      refreshStats();
-    }
+    if (!auth?.connected) return;
+    refreshStats();
+    api.syncStatus().then(setSync).catch(() => {});
   }, [auth?.connected, refreshStats]);
 
   useEffect(() => {
@@ -159,20 +264,110 @@ export default function HomePage() {
       setContacts([]);
       setNextLink(null);
       setTotal(null);
+      setStats(null);
+      setSync(null);
+      setLoading(false);
+      loadedKeyRef.current = null;
+      return;
+    }
+
+    const filters = currentFilters(q, fundraisingTier, emailCountMin, reviewFilter);
+    const key = JSON.stringify(filters);
+
+    // Already restored/loaded these filters — don't let a later stats update
+    // clobber the list or reset infinite-scroll pagination.
+    if (loadedKeyRef.current === key) return;
+
+    // Restore from the session cache immediately, without waiting for stats.
+    const cached = loadContactCache(auth.user_email, filters);
+    if (cached) {
+      loadedKeyRef.current = key;
+      loadGenRef.current += 1;
+      useLocalRef.current = cached.source === "local";
+      setContacts(cached.contacts);
+      setTotal(cached.total);
+      setDataSource(cached.source);
+      pageRef.current = cached.page;
+      setNextLink(
+        cached.source === "local"
+          ? cached.total != null && cached.contacts.length < cached.total
+            ? `local:${cached.page + 1}`
+            : null
+          : "resume"
+      );
       setLoading(false);
       return;
     }
 
+    // No cache: we need stats to pick the source. This call is now DB-only/fast.
+    if (stats === null) {
+      setLoading(true);
+      return;
+    }
+
+    loadedKeyRef.current = key;
+    const useLocal = stats.external_contacts > 0;
+    useLocalRef.current = useLocal;
     loadGenRef.current += 1;
     setContacts([]);
     setNextLink(null);
-    setTotal(null);
-    loadContactsPage(null, false);
-  }, [auth?.connected, q, loadContactsPage]);
+    pageRef.current = 1;
+    if (!useLocal) setTotal(null);
+    loadContactsPage(null, false, useLocal);
+  }, [auth?.connected, auth?.user_email, q, fundraisingTier, emailCountMin, reviewFilter, stats, loadContactsPage]);
+
+  useEffect(() => {
+    if (!auth?.connected || !stats || stats.external_contacts > 0 || stats.synced_messages > 0) return;
+    if (sync?.status === "running") return;
+
+    let cancelled = false;
+    (async () => {
+      const status = await api.syncStatus();
+      if (cancelled) return;
+      if (status?.status === "running") {
+        setSync(status);
+        return;
+      }
+      try {
+        const run = await api.startSync();
+        if (!cancelled) setSync(run);
+      } catch {
+        // User can start sync manually.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auth?.connected, stats?.external_contacts, stats?.synced_messages, sync?.status]);
+
+  useEffect(() => {
+    if (!sync || sync.status !== "running") return;
+    const timer = setInterval(async () => {
+      const status = await api.syncStatus();
+      setSync(status);
+      // Fetch the live Graph total only while syncing so progress "X / Y" shows.
+      const statsData = await refreshStats(true);
+      if (status?.status !== "running") {
+        if ((statsData?.external_contacts ?? 0) > 0) {
+          loadedKeyRef.current = JSON.stringify(
+            currentFilters(q, fundraisingTier, emailCountMin, reviewFilter)
+          );
+          loadGenRef.current += 1;
+          pageRef.current = 1;
+          setContacts([]);
+          clearContactCache();
+          loadContactsPage(null, false, true);
+        }
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [sync, refreshStats, loadContactsPage, q, fundraisingTier, emailCountMin, reviewFilter]);
 
   const hasMore = !!nextLink;
 
   const filteredContacts = useMemo(() => {
+    if (dataSource === "local") return contacts;
     const minEmails = emailCountMin.trim() === "" ? null : Number(emailCountMin);
     return contacts.filter((contact) => {
       if (fundraisingTier && (contact.fundraising_relevance_tier || "low") !== fundraisingTier) {
@@ -186,7 +381,7 @@ export default function HomePage() {
       }
       return true;
     });
-  }, [contacts, fundraisingTier, emailCountMin, reviewFilter]);
+  }, [contacts, dataSource, fundraisingTier, emailCountMin, reviewFilter]);
 
   const filtersActive = Boolean(fundraisingTier || emailCountMin.trim() || reviewFilter);
 
@@ -197,9 +392,9 @@ export default function HomePage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && nextLink) {
-          loadContactsPage(nextLink, true);
-        }
+        if (!entries[0]?.isIntersecting || !nextLink) return;
+        const cursor = nextLink === "resume" ? null : nextLink;
+        loadContactsPage(cursor, true);
       },
       { root, rootMargin: "200px", threshold: 0 }
     );
@@ -207,15 +402,32 @@ export default function HomePage() {
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, nextLink, loadContactsPage, auth?.connected]);
 
+  async function handleSync() {
+    setSyncing(true);
+    setError(null);
+    try {
+      const run = await api.startSync();
+      setSync(run);
+      clearContactCache();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start sync");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function handleDisconnect() {
     setDisconnecting(true);
     setError(null);
     try {
       await api.disconnect();
+      clearContactCache();
       setAuth({ connected: false, user_email: null });
       setContacts([]);
       setNextLink(null);
       setTotal(null);
+      setStats(null);
+      setSync(null);
       setSelected(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disconnect");
@@ -226,19 +438,49 @@ export default function HomePage() {
 
   async function setReviewStatus(contact: OutlookContact, review_status: string) {
     try {
-      const updated = await api.updateContactByEmail(contact.primary_email, { review_status });
-      setContacts((prev) =>
-        prev.map((c) =>
+      const contactId = contact.local_contact_id || contact.id;
+      const updated =
+        dataSource === "local" && contactId
+          ? await api.updateContact(contactId, { review_status })
+          : await api.updateContactByEmail(contact.primary_email, { review_status });
+      setContacts((prev) => {
+        const next = prev.map((c) =>
           c.primary_email === contact.primary_email
             ? { ...c, review_status: updated.review_status, local_contact_id: updated.id }
             : c
-        )
-      );
+        );
+        persistCache(next, pageRef.current, dataSource, total);
+        return next;
+      });
       if (selected?.primary_email === contact.primary_email) {
         setSelected((prev) => (prev ? { ...prev, review_status: updated.review_status } : prev));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update review status");
+    }
+  }
+
+  async function loadRecentEmails(contact: OutlookContact) {
+    setRecentEmailsLoading(true);
+    setRecentEmails([]);
+    try {
+      const result = await api.contactMessagesByEmail(contact.primary_email, 5);
+      setRecentEmails(result.items);
+    } catch {
+      if (contact.last_subject || contact.last_preview) {
+        setRecentEmails([
+          {
+            subject: contact.last_subject,
+            body_preview: contact.last_preview,
+            sent_datetime: contact.last_contacted_at,
+            direction: "outbound",
+            outlook_weblink: contact.latest_outlook_weblink,
+            has_attachments: false,
+          },
+        ]);
+      }
+    } finally {
+      setRecentEmailsLoading(false);
     }
   }
 
@@ -316,17 +558,27 @@ export default function HomePage() {
     setSeniorityLoading(false);
     setRelationship(null);
     setRelationshipLoading(false);
+    setRecentEmails([]);
+    setRecentEmailsLoading(false);
     setSelected(contact);
     try {
-      const detail = await api.outlookContact(contact.id);
-      const merged = { ...contact, ...detail };
+      const detail =
+        dataSource === "local"
+          ? await api.contact(contact.local_contact_id || contact.id)
+          : await api.outlookContact(contact.id);
+      const merged = {
+        ...contact,
+        ...(dataSource === "local" ? contactToRow(detail as Contact) : detail),
+      };
       setSelected(merged);
       void loadSeniority(merged);
       void loadRelationship(merged);
+      void loadRecentEmails(merged);
     } catch (err) {
       setSelected(null);
       setSeniority(null);
       setRelationship(null);
+      setRecentEmails([]);
       setError(err instanceof Error ? err.message : "Failed to load contact");
     } finally {
       setDetailLoading(false);
@@ -348,7 +600,9 @@ export default function HomePage() {
           <Nav />
           <h1 style={{ marginTop: 12 }}>Relationship Intelligence CRM</h1>
           <p>
-            Contacts from Outlook Sent Items — loaded 50 at a time
+            {dataSource === "local"
+              ? "Contacts from synced Sent Items — fast local database"
+              : "Contacts from Outlook Sent Items — sync recommended for large mailboxes"}
             {auth?.connected && auth.user_email ? ` · ${auth.user_email}` : ""}
           </p>
         </div>
@@ -358,9 +612,23 @@ export default function HomePage() {
               Connect Microsoft Outlook
             </a>
           ) : (
-            <button className="primary" onClick={handleDisconnect} disabled={disconnecting}>
-              {disconnecting ? "Disconnecting…" : "Disconnect Outlook"}
-            </button>
+            <>
+              <button
+                onClick={handleSync}
+                disabled={syncing || sync?.status === "running"}
+              >
+                {sync?.status === "running"
+                  ? "Syncing…"
+                  : syncing
+                    ? "Starting sync…"
+                    : stats?.sync_complete
+                      ? "Re-sync Sent Items"
+                      : "Sync Sent Items"}
+              </button>
+              <button className="primary" onClick={handleDisconnect} disabled={disconnecting}>
+                {disconnecting ? "Disconnecting…" : "Disconnect Outlook"}
+              </button>
+            </>
           )}
           <a className="button" href={api.exportXlsxUrl()}>
             Export Excel
@@ -373,15 +641,35 @@ export default function HomePage() {
 
       {error && <div className="banner error">{error}</div>}
 
-      {auth?.connected && total != null && (
+      {auth?.connected && sync?.status === "running" && (
+        <div className="banner">
+          Importing Sent Items from Outlook: {sync.messages_fetched.toLocaleString()} messages fetched
+          {stats?.graph_sent_total ? ` of ${stats.graph_sent_total.toLocaleString()}` : ""}…
+        </div>
+      )}
+
+      {auth?.connected && stats && stats.external_contacts === 0 && sync?.status !== "running" && (
+        <div className="banner">
+          No contacts synced yet. Click <strong>Sync Sent Items</strong> to import your mailbox (first run may take 15–30+ minutes).
+        </div>
+      )}
+
+      {auth?.connected && stats && (
         <div className="stats">
           <div className="stat-card">
-            <div className="label">Sent Items in Outlook</div>
-            <div className="value">{total.toLocaleString()}</div>
+            <div className="label">External contacts</div>
+            <div className="value">{stats.external_contacts.toLocaleString()}</div>
           </div>
           <div className="stat-card">
-            <div className="label">Contacts loaded</div>
-            <div className="value">{contacts.length.toLocaleString()}</div>
+            <div className="label">Messages synced</div>
+            <div className="value">
+              {stats.synced_messages.toLocaleString()}
+              {stats.graph_sent_total != null ? ` / ${stats.graph_sent_total.toLocaleString()}` : ""}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="label">Showing in table</div>
+            <div className="value">{filteredContacts.length.toLocaleString()}</div>
           </div>
         </div>
       )}
@@ -549,11 +837,15 @@ export default function HomePage() {
           {auth?.connected && (
             <div className="pagination">
               <span>
-                {filtersActive
-                  ? `Showing ${filteredContacts.length.toLocaleString()} of ${contacts.length.toLocaleString()} loaded contacts`
-                  : `Showing ${contacts.length.toLocaleString()} contacts from Sent Items`}
+                {dataSource === "local" && total != null
+                  ? filtersActive || q
+                    ? `Showing ${filteredContacts.length.toLocaleString()} of ${total.toLocaleString()} contacts`
+                    : `Showing ${contacts.length.toLocaleString()} of ${total.toLocaleString()} contacts`
+                  : filtersActive
+                    ? `Showing ${filteredContacts.length.toLocaleString()} of ${contacts.length.toLocaleString()} loaded contacts`
+                    : `Showing ${contacts.length.toLocaleString()} contacts from Sent Items`}
               </span>
-              {!hasMore && contacts.length > 0 && <span>End of Sent Items reached</span>}
+              {!hasMore && contacts.length > 0 && <span>End of list reached</span>}
             </div>
           )}
         </div>
@@ -614,13 +906,33 @@ export default function HomePage() {
             ) : (
               <>
                 <section className="drawer-section">
-                  <h3>Latest email</h3>
-                  <p className="drawer-subject">{selected.last_subject || "—"}</p>
-                  <p className="drawer-body preview-block">{selected.last_preview || "No preview available."}</p>
-                  {selected.latest_outlook_weblink && (
-                    <a href={selected.latest_outlook_weblink} target="_blank" rel="noreferrer">
-                      Open in Outlook →
-                    </a>
+                  <h3>Recent emails</h3>
+                  {recentEmailsLoading ? (
+                    <p className="drawer-relationship-loading">Loading recent emails…</p>
+                  ) : recentEmails.length === 0 ? (
+                    <p className="drawer-relationship-loading">No exchanged emails found.</p>
+                  ) : (
+                    <div className="drawer-email-list">
+                      {recentEmails.map((email, index) => (
+                        <article className="drawer-email-item" key={`${email.sent_datetime}-${index}`}>
+                          <div className="drawer-email-meta">
+                            <span className={`chip direction ${email.direction}`}>
+                              {directionLabel(email.direction)}
+                            </span>
+                            <span className="drawer-email-date">{formatDate(email.sent_datetime)}</span>
+                          </div>
+                          <p className="drawer-subject">{email.subject || "—"}</p>
+                          <p className="drawer-body preview-block">
+                            {email.body_preview || "No preview available."}
+                          </p>
+                          {email.outlook_weblink && (
+                            <a href={email.outlook_weblink} target="_blank" rel="noreferrer">
+                              Open in Outlook →
+                            </a>
+                          )}
+                        </article>
+                      ))}
+                    </div>
                   )}
                 </section>
                 <section className="drawer-section">
