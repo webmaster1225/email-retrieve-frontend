@@ -306,7 +306,7 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== "" && v !== undefined && v !== null) qs.set(k, String(v));
     });
-    return apiFetch<{ items: Contact[]; total: number; page: number; page_size: number }>(
+    return apiFetch<{ items: Contact[]; total: number | null; page: number; page_size: number }>(
       `/contacts?${qs.toString()}`
     );
   },
@@ -329,6 +329,7 @@ export const api = {
     >(`/contacts/${id}/messages`),
   startSync: () => apiFetch<SyncRun>("/sync/start", { method: "POST" }),
   startInboxSync: () => apiFetch<SyncRun>("/sync/start-inbox", { method: "POST" }),
+  failRunningSyncs: () => apiFetch<SyncRun[]>("/sync/fail-running", { method: "POST" }),
   syncStatus: () => apiFetch<SyncRun | null>("/sync/status"),
   loginUrl: () => `${API_BASE}/auth/login`,
   getOutreachPrompt: () => apiFetch<OutreachPrompt>("/outreach/prompt"),

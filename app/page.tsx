@@ -24,7 +24,9 @@ import {
 } from "@/lib/contactCache";
 import { RelevanceTierHelp } from "@/lib/helpText";
 
-const PAGE_SIZE = 50;
+// Keep within /contacts max (200). Smaller first page = faster first paint.
+const PAGE_SIZE = 200;
+const OUTLOOK_PAGE_SIZE = 100;
 
 const USEFULNESS_LABELS: Record<string, string> = {
   business_development: "Business dev",
@@ -120,12 +122,17 @@ export default function HomePage() {
   const loadGenRef = useRef(0);
   const contactsRef = useRef<OutlookContact[]>([]);
   const pageRef = useRef(1);
+  const totalRef = useRef<number | null>(null);
   const useLocalRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     contactsRef.current = contacts;
   }, [contacts]);
+
+  useEffect(() => {
+    totalRef.current = total;
+  }, [total]);
 
   useEffect(() => {
     if (!selected) return;
@@ -200,6 +207,8 @@ export default function HomePage() {
             exclude_noise: true,
             sort: "last_contacted_at",
             order: "desc",
+            // Only page 1 needs a total; scroll pages skip the expensive COUNT
+            include_total: !append,
           };
           if (q) params.q = q;
           if (fundraisingTier) params.fundraising_tier = fundraisingTier;
@@ -211,17 +220,21 @@ export default function HomePage() {
 
           const rows = contactData.items.map(contactToRow);
           const merged = append ? [...contactsRef.current, ...rows] : rows;
+          const nextTotal =
+            contactData.total != null ? contactData.total : append ? totalRef.current : null;
           setContacts(merged);
           setDataSource("local");
-          setTotal(contactData.total);
-          setNextLink(page * PAGE_SIZE < contactData.total ? `local:${page + 1}` : null);
-          persistCache(merged, page, "local", contactData.total);
+          setTotal(nextTotal);
+          const hasMorePage =
+            nextTotal != null ? page * PAGE_SIZE < nextTotal : rows.length >= PAGE_SIZE;
+          setNextLink(hasMorePage ? `local:${page + 1}` : null);
+          persistCache(merged, page, "local", nextTotal);
         } else {
           const excludeEmails = append
             ? contactsRef.current.map((c) => c.primary_email).join(",")
             : undefined;
           const contactData = await api.outlookContacts({
-            page_size: PAGE_SIZE,
+            page_size: OUTLOOK_PAGE_SIZE,
             next_link: cursor || undefined,
             q: q || undefined,
             exclude_emails: excludeEmails,
@@ -290,31 +303,54 @@ export default function HomePage() {
       pageRef.current = cached.page;
       setNextLink(
         cached.source === "local"
-          ? cached.total != null && cached.contacts.length < cached.total
-            ? `local:${cached.page + 1}`
-            : null
+          ? cached.total != null
+            ? cached.contacts.length < cached.total
+              ? `local:${cached.page + 1}`
+              : null
+            : cached.contacts.length >= cached.page * PAGE_SIZE
+              ? `local:${cached.page + 1}`
+              : null
           : "resume"
       );
       setLoading(false);
       return;
     }
 
-    // No cache: we need stats to pick the source. This call is now DB-only/fast.
-    if (stats === null) {
-      setLoading(true);
-      return;
-    }
-
+    // Load local DB immediately — don't wait for stats (stats run in parallel).
+    // If the DB is empty, fall back to Outlook once stats confirm that.
     loadedKeyRef.current = key;
-    const useLocal = stats.external_contacts > 0;
-    useLocalRef.current = useLocal;
+    useLocalRef.current = true;
     loadGenRef.current += 1;
     setContacts([]);
     setNextLink(null);
     pageRef.current = 1;
-    if (!useLocal) setTotal(null);
-    loadContactsPage(null, false, useLocal);
-  }, [auth?.connected, auth?.user_email, q, fundraisingTier, emailCountMin, reviewFilter, stats, loadContactsPage]);
+    loadContactsPage(null, false, true);
+  }, [auth?.connected, auth?.user_email, q, fundraisingTier, emailCountMin, reviewFilter, loadContactsPage]);
+
+  // If optimistic local load returned nothing and there is no synced data, use Outlook Graph.
+  useEffect(() => {
+    if (!auth?.connected || stats === null) return;
+    if (useLocalRef.current && stats.external_contacts === 0 && contacts.length === 0 && !loading) {
+      const filters = currentFilters(q, fundraisingTier, emailCountMin, reviewFilter);
+      const key = JSON.stringify(filters);
+      loadedKeyRef.current = key;
+      useLocalRef.current = false;
+      loadGenRef.current += 1;
+      pageRef.current = 1;
+      setTotal(null);
+      loadContactsPage(null, false, false);
+    }
+  }, [
+    auth?.connected,
+    stats,
+    contacts.length,
+    loading,
+    q,
+    fundraisingTier,
+    emailCountMin,
+    reviewFilter,
+    loadContactsPage,
+  ]);
 
   useEffect(() => {
     if (!auth?.connected || !stats || stats.external_contacts > 0 || stats.synced_messages > 0) return;
@@ -411,6 +447,20 @@ export default function HomePage() {
       clearContactCache();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start sync");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleClearStuckSync() {
+    setSyncing(true);
+    setError(null);
+    try {
+      await api.failRunningSyncs();
+      const status = await api.syncStatus();
+      setSync(status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear stuck sync");
     } finally {
       setSyncing(false);
     }
@@ -593,8 +643,39 @@ export default function HomePage() {
     return classes.join(" ");
   }
 
+  const isSyncing = syncing || sync?.status === "running";
+  const pageBusy = Boolean(auth?.connected && (loading || isSyncing));
+
+  useEffect(() => {
+    if (!pageBusy) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [pageBusy]);
+
+  useEffect(() => {
+    if (pageBusy) setSelected(null);
+  }, [pageBusy]);
+
+  const busyTitle = isSyncing
+    ? sync?.status === "running"
+      ? `Syncing ${sync.sync_type === "inbox" ? "Inbox" : "Sent Items"}…`
+      : "Starting sync…"
+    : "Loading contacts…";
+
+  const busyDetail =
+    sync?.status === "running"
+      ? `${sync.messages_fetched.toLocaleString()} messages fetched${
+          stats?.graph_sent_total ? ` of ${stats.graph_sent_total.toLocaleString()}` : ""
+        }`
+      : loading
+        ? "Please wait while contacts load from the database."
+        : "Connecting to Outlook…";
+
   return (
-    <main className="page">
+    <main className="page" aria-busy={pageBusy}>
       <div className="header">
         <div>
           <Nav />
@@ -615,7 +696,7 @@ export default function HomePage() {
             <>
               <button
                 onClick={handleSync}
-                disabled={syncing || sync?.status === "running"}
+                disabled={pageBusy || !auth?.connected}
               >
                 {sync?.status === "running"
                   ? "Syncing…"
@@ -625,28 +706,35 @@ export default function HomePage() {
                       ? "Re-sync Sent Items"
                       : "Sync Sent Items"}
               </button>
-              <button className="primary" onClick={handleDisconnect} disabled={disconnecting}>
+              <button className="primary" onClick={handleDisconnect} disabled={disconnecting || pageBusy}>
                 {disconnecting ? "Disconnecting…" : "Disconnect Outlook"}
               </button>
             </>
           )}
-          <a className="button" href={api.exportXlsxUrl()}>
+          <a
+            className={`button${pageBusy ? " disabled" : ""}`}
+            href={pageBusy ? undefined : api.exportXlsxUrl()}
+            aria-disabled={pageBusy}
+            onClick={(e) => {
+              if (pageBusy) e.preventDefault();
+            }}
+          >
             Export Excel
           </a>
-          <a className="button" href={api.exportCsvUrl()}>
+          <a
+            className={`button${pageBusy ? " disabled" : ""}`}
+            href={pageBusy ? undefined : api.exportCsvUrl()}
+            aria-disabled={pageBusy}
+            onClick={(e) => {
+              if (pageBusy) e.preventDefault();
+            }}
+          >
             Export CSV
           </a>
         </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
-
-      {auth?.connected && sync?.status === "running" && (
-        <div className="banner">
-          Importing Sent Items from Outlook: {sync.messages_fetched.toLocaleString()} messages fetched
-          {stats?.graph_sent_total ? ` of ${stats.graph_sent_total.toLocaleString()}` : ""}…
-        </div>
-      )}
 
       {auth?.connected && stats && stats.external_contacts === 0 && sync?.status !== "running" && (
         <div className="banner">
@@ -682,12 +770,12 @@ export default function HomePage() {
                 placeholder="Search name, email, or company…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                disabled={!auth?.connected}
+                disabled={!auth?.connected || pageBusy}
               />
               <select
                 value={fundraisingTier}
                 onChange={(e) => setFundraisingTier(e.target.value)}
-                disabled={!auth?.connected}
+                disabled={!auth?.connected || pageBusy}
               >
                 <option value="">All relevance</option>
                 <option value="high">High</option>
@@ -698,13 +786,13 @@ export default function HomePage() {
                 placeholder="Min emails"
                 value={emailCountMin}
                 onChange={(e) => setEmailCountMin(e.target.value)}
-                disabled={!auth?.connected}
+                disabled={!auth?.connected || pageBusy}
                 inputMode="numeric"
               />
               <select
                 value={reviewFilter}
                 onChange={(e) => setReviewFilter(e.target.value)}
-                disabled={!auth?.connected}
+                disabled={!auth?.connected || pageBusy}
               >
                 <option value="">All review status</option>
                 <option value="pending">To review</option>
@@ -1037,6 +1125,27 @@ export default function HomePage() {
           </>
         )}
       </div>
+
+      {pageBusy && (
+        <div className="page-busy-overlay" role="alertdialog" aria-modal="true" aria-labelledby="page-busy-title">
+          <div className="page-busy-card">
+            <div className="page-busy-spinner" aria-hidden="true" />
+            <h2 id="page-busy-title">{busyTitle}</h2>
+            <p>{busyDetail}</p>
+            {sync?.status === "running" && (
+              <button
+                type="button"
+                className="button"
+                onClick={handleClearStuckSync}
+                disabled={syncing}
+                title="Use if sync froze after an app restart"
+              >
+                Clear stuck sync
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
