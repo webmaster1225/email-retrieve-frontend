@@ -75,7 +75,7 @@ export default function OutreachPage() {
         review_status: "approved",
         exclude_internal: true,
         exclude_noise: true,
-        page_size: 200,
+        page_size: 100,
         sort: sortByScore ? "outreach_relevance_score" : "list_number",
         order: sortByScore ? "desc" : "asc",
       };
