@@ -1677,12 +1677,17 @@ th .info-tip-popover::before {
 }
 
 .page-busy-card p {
+<<<<<<< HEAD
   margin: 0 0 12px;
+=======
+  margin: 0 0 16px;
+>>>>>>> ee46a0d119c25e6751a4ea68f1d3045439dcbf61
   color: var(--text-muted);
   font-size: 0.95rem;
   line-height: 1.45;
 }
 
+<<<<<<< HEAD
 .page-busy-progress {
   width: 100%;
   height: 8px;
@@ -1704,6 +1709,8 @@ th .info-tip-popover::before {
   animation: page-busy-progress-slide 1.1s ease-in-out infinite;
 }
 
+=======
+>>>>>>> ee46a0d119c25e6751a4ea68f1d3045439dcbf61
 .page-busy-spinner {
   width: 40px;
   height: 40px;
@@ -1727,6 +1734,7 @@ a.button[aria-disabled="true"] {
   }
 }
 
+<<<<<<< HEAD
 @keyframes page-busy-progress-slide {
   0% {
     transform: translateX(-120%);
@@ -1736,6 +1744,8 @@ a.button[aria-disabled="true"] {
   }
 }
 
+=======
+>>>>>>> ee46a0d119c25e6751a4ea68f1d3045439dcbf61
 @keyframes page-busy-in {
   from {
     opacity: 0;
