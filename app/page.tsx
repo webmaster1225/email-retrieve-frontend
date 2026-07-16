@@ -26,7 +26,7 @@ import { RelevanceTierHelp } from "@/lib/helpText";
 
 // Keep within /contacts max (200). Smaller first page = faster first paint.
 const PAGE_SIZE = 200;
-const OUTLOOK_PAGE_SIZE = 200;
+const OUTLOOK_PAGE_SIZE = 100;
 
 const USEFULNESS_LABELS: Record<string, string> = {
   business_development: "Business dev",
