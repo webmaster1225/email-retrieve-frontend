@@ -25,6 +25,7 @@ export type Contact = {
   outreach_score_explanation?: string | null;
   auto_context_short: string | null;
   detected_topics: string[] | null;
+  detected_role: string | null;
   last_subject: string | null;
   last_preview: string | null;
   latest_outlook_weblink: string | null;
@@ -198,6 +199,15 @@ export type OutreachJob = {
   progress_pct: number;
 };
 
+export type ExchangeEmail = {
+  subject: string | null;
+  body_preview: string | null;
+  sent_datetime: string | null;
+  direction: string;
+  outlook_weblink: string | null;
+  has_attachments: boolean;
+};
+
 export type OutlookContact = {
   id: string;
   local_contact_id: string | null;
@@ -254,7 +264,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   authStatus: () => apiFetch<AuthStatus>("/auth/status"),
   disconnect: () => apiFetch<{ connected: boolean }>("/auth/disconnect", { method: "POST" }),
-  stats: () => apiFetch<Stats>("/contacts/stats"),
+  stats: (includeGraphTotal = false) =>
+    apiFetch<Stats>(`/contacts/stats${includeGraphTotal ? "?include_graph_total=true" : ""}`),
   outlookContacts: (params: {
     page_size?: number;
     next_link?: string;
@@ -278,6 +289,10 @@ export const api = {
     }>(`/contacts/outlook?${qs.toString()}`);
   },
   outlookContact: (id: string) => apiFetch<OutlookContact>(`/contacts/outlook/${encodeURIComponent(id)}`),
+  contactMessagesByEmail: (email: string, limit = 5) =>
+    apiFetch<{ items: ExchangeEmail[] }>(
+      `/contacts/by-email/${encodeURIComponent(email)}/messages?limit=${limit}`
+    ),
   updateContactByEmail: (email: string, data: { review_status?: string; notes?: string }) =>
     apiFetch<{ id: string; review_status: string; local_contact_id?: string | null }>(
       `/contacts/by-email/${encodeURIComponent(email)}`,
@@ -291,7 +306,7 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== "" && v !== undefined && v !== null) qs.set(k, String(v));
     });
-    return apiFetch<{ items: Contact[]; total: number; page: number; page_size: number }>(
+    return apiFetch<{ items: Contact[]; total: number | null; page: number; page_size: number }>(
       `/contacts?${qs.toString()}`
     );
   },
@@ -314,6 +329,7 @@ export const api = {
     >(`/contacts/${id}/messages`),
   startSync: () => apiFetch<SyncRun>("/sync/start", { method: "POST" }),
   startInboxSync: () => apiFetch<SyncRun>("/sync/start-inbox", { method: "POST" }),
+  failRunningSyncs: () => apiFetch<SyncRun[]>("/sync/fail-running", { method: "POST" }),
   syncStatus: () => apiFetch<SyncRun | null>("/sync/status"),
   loginUrl: () => `${API_BASE}/auth/login`,
   getOutreachPrompt: () => apiFetch<OutreachPrompt>("/outreach/prompt"),
