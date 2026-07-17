@@ -246,7 +246,12 @@ export type AuthStatus = {
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      // Free ngrok returns an interstitial HTML page (no CORS headers) unless skipped.
+      "ngrok-skip-browser-warning": "true",
+      ...(init?.headers || {}),
+    },
     cache: "no-store",
   });
   if (!res.ok) {
