@@ -1,6 +1,6 @@
 import { OutlookContact } from "@/lib/api";
 
-const CACHE_KEY = "crm-contacts-v1";
+const CACHE_KEY = "crm-contacts-v2";
 
 export type ContactCacheFilters = {
   q: string;

@@ -24,9 +24,10 @@ import {
 } from "@/lib/contactCache";
 import { RelevanceTierHelp } from "@/lib/helpText";
 
-// Keep within /contacts max (200). Smaller first page = faster first paint.
-const PAGE_SIZE = 100;
-const OUTLOOK_PAGE_SIZE = 100;
+// Keep within /contacts max (100).
+const PAGE_SIZE = 50;
+const OUTLOOK_PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 300;
 
 const USEFULNESS_LABELS: Record<string, string> = {
   business_development: "Business dev",
@@ -94,13 +95,13 @@ export default function HomePage() {
   const [auth, setAuth] = useState<{ connected: boolean; user_email: string | null } | null>(null);
   const [contacts, setContacts] = useState<OutlookContact[]>([]);
   const [total, setTotal] = useState<number | null>(null);
-  const [nextLink, setNextLink] = useState<string | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [sync, setSync] = useState<SyncRun | null>(null);
   const [dataSource, setDataSource] = useState<"local" | "outlook">("outlook");
   const [selected, setSelected] = useState<OutlookContact | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -113,18 +114,21 @@ export default function HomePage() {
   const [recentEmailsLoading, setRecentEmailsLoading] = useState(false);
 
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [fundraisingTier, setFundraisingTier] = useState("");
   const [emailCountMin, setEmailCountMin] = useState("");
+  const [debouncedEmailCountMin, setDebouncedEmailCountMin] = useState("");
   const [reviewFilter, setReviewFilter] = useState("");
+  const [page, setPage] = useState(1);
 
-  const tableWrapRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLTableRowElement>(null);
   const loadGenRef = useRef(0);
   const contactsRef = useRef<OutlookContact[]>([]);
   const pageRef = useRef(1);
   const totalRef = useRef<number | null>(null);
   const useLocalRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
+  const outlookCursorsRef = useRef<Map<number, string | null>>(new Map([[1, null]]));
+  const filterKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     contactsRef.current = contacts;
@@ -133,6 +137,20 @@ export default function HomePage() {
   useEffect(() => {
     totalRef.current = total;
   }, [total]);
+
+  useEffect(() => {
+    pageRef.current = page;
+  }, [page]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedEmailCountMin(emailCountMin.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [emailCountMin]);
 
   useEffect(() => {
     if (!selected) return;
@@ -177,78 +195,88 @@ export default function HomePage() {
   }, []);
 
   const persistCache = useCallback(
-    (items: OutlookContact[], page: number, source: "local" | "outlook", totalCount: number | null) => {
+    (items: OutlookContact[], pageNum: number, source: "local" | "outlook", totalCount: number | null) => {
       saveContactCache({
         contacts: items,
-        page,
+        page: pageNum,
         total: totalCount,
         source,
-        filters: currentFilters(q, fundraisingTier, emailCountMin, reviewFilter),
+        filters: currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter),
         userEmail: auth?.user_email ?? null,
       });
     },
-    [auth?.user_email, q, fundraisingTier, emailCountMin, reviewFilter]
+    [auth?.user_email, debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter]
   );
 
+  const resetOutlookCursors = useCallback(() => {
+    outlookCursorsRef.current = new Map([[1, null]]);
+  }, []);
+
   const loadContactsPage = useCallback(
-    async (cursor: string | null, append: boolean, useLocal = useLocalRef.current) => {
+    async (pageNum: number, useLocal = useLocalRef.current) => {
       const gen = loadGenRef.current;
-      if (append) setLoadingMore(true);
-      else setLoading(true);
+      const isInitial = contactsRef.current.length === 0;
+      if (isInitial) setLoading(true);
+      else setPageLoading(true);
       setError(null);
       try {
         if (useLocal) {
-          const page = append ? pageRef.current + 1 : 1;
-          pageRef.current = page;
           const params: Record<string, string | number | boolean> = {
-            page,
+            page: pageNum,
             page_size: PAGE_SIZE,
             exclude_internal: true,
             exclude_noise: true,
             sort: "last_contacted_at",
             order: "desc",
-            // Only page 1 needs a total; scroll pages skip the expensive COUNT
-            include_total: !append,
+            include_total: true,
           };
-          if (q) params.q = q;
+          if (debouncedQ) params.q = debouncedQ;
           if (fundraisingTier) params.fundraising_tier = fundraisingTier;
-          if (emailCountMin.trim()) params.email_count_min = Number(emailCountMin);
+          if (debouncedEmailCountMin) {
+            const minEmails = Number(debouncedEmailCountMin);
+            if (!Number.isNaN(minEmails)) params.email_count_min = minEmails;
+          }
           if (reviewFilter) params.review_status = reviewFilter;
 
           const contactData = await api.contacts(params);
           if (gen !== loadGenRef.current) return;
 
           const rows = contactData.items.map(contactToRow);
-          const merged = append ? [...contactsRef.current, ...rows] : rows;
-          const nextTotal =
-            contactData.total != null ? contactData.total : append ? totalRef.current : null;
-          setContacts(merged);
+          const nextTotal = contactData.total ?? totalRef.current;
+          setContacts(rows);
           setDataSource("local");
           setTotal(nextTotal);
-          const hasMorePage =
-            nextTotal != null ? page * PAGE_SIZE < nextTotal : rows.length >= PAGE_SIZE;
-          setNextLink(hasMorePage ? `local:${page + 1}` : null);
-          persistCache(merged, page, "local", nextTotal);
+          pageRef.current = pageNum;
+          const hasMore =
+            nextTotal != null ? pageNum * PAGE_SIZE < nextTotal : rows.length >= PAGE_SIZE;
+          setHasNextPage(hasMore);
+          persistCache(rows, pageNum, "local", nextTotal);
         } else {
-          const excludeEmails = append
-            ? contactsRef.current.map((c) => c.primary_email).join(",")
-            : undefined;
+          const cursor = outlookCursorsRef.current.has(pageNum)
+            ? outlookCursorsRef.current.get(pageNum) ?? null
+            : null;
+          if (pageNum > 1 && !outlookCursorsRef.current.has(pageNum)) {
+            throw new Error("That page is not loaded yet. Use Next to move forward.");
+          }
+
           const contactData = await api.outlookContacts({
             page_size: OUTLOOK_PAGE_SIZE,
             next_link: cursor || undefined,
-            q: q || undefined,
-            exclude_emails: excludeEmails,
-            include_total: false,
+            q: debouncedQ || undefined,
+            include_total: pageNum === 1,
             prefer_local: false,
           });
           if (gen !== loadGenRef.current) return;
 
-          const merged = append ? [...contactsRef.current, ...contactData.items] : contactData.items;
-          setContacts(merged);
+          if (contactData.next_link) {
+            outlookCursorsRef.current.set(pageNum + 1, contactData.next_link);
+          }
+          setContacts(contactData.items);
           setDataSource("outlook");
-          setNextLink(contactData.next_link);
+          setHasNextPage(!!contactData.next_link);
           if (contactData.total != null) setTotal(contactData.total);
-          persistCache(merged, append ? pageRef.current + 1 : 1, "outlook", contactData.total);
+          pageRef.current = pageNum;
+          persistCache(contactData.items, pageNum, "outlook", contactData.total ?? totalRef.current);
         }
       } catch (err) {
         if (gen !== loadGenRef.current) return;
@@ -256,10 +284,10 @@ export default function HomePage() {
       } finally {
         if (gen !== loadGenRef.current) return;
         setLoading(false);
-        setLoadingMore(false);
+        setPageLoading(false);
       }
     },
-    [q, fundraisingTier, emailCountMin, reviewFilter, persistCache]
+    [debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter, persistCache]
   );
 
   useEffect(() => {
@@ -275,81 +303,95 @@ export default function HomePage() {
   useEffect(() => {
     if (!auth?.connected) {
       setContacts([]);
-      setNextLink(null);
+      setHasNextPage(false);
       setTotal(null);
       setStats(null);
       setSync(null);
       setLoading(false);
+      setPage(1);
       loadedKeyRef.current = null;
+      filterKeyRef.current = null;
+      resetOutlookCursors();
       return;
     }
 
-    const filters = currentFilters(q, fundraisingTier, emailCountMin, reviewFilter);
-    const key = JSON.stringify(filters);
+    const filters = currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter);
+    const filterKey = JSON.stringify(filters);
+    const filtersChanged = filterKeyRef.current !== filterKey;
 
-    // Already restored/loaded these filters — don't let a later stats update
-    // clobber the list or reset infinite-scroll pagination.
-    if (loadedKeyRef.current === key) return;
+    if (filtersChanged) {
+      filterKeyRef.current = filterKey;
+      loadedKeyRef.current = null;
+      resetOutlookCursors();
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
 
-    // Restore from the session cache immediately, without waiting for stats.
+    const cacheKey = `${filterKey}|${page}`;
+    if (loadedKeyRef.current === cacheKey) return;
+
     const cached = loadContactCache(auth.user_email, filters);
-    if (cached) {
-      loadedKeyRef.current = key;
+    if (cached && cached.page === page) {
+      loadedKeyRef.current = cacheKey;
       loadGenRef.current += 1;
       useLocalRef.current = cached.source === "local";
       setContacts(cached.contacts);
       setTotal(cached.total);
       setDataSource(cached.source);
       pageRef.current = cached.page;
-      setNextLink(
-        cached.source === "local"
-          ? cached.total != null
-            ? cached.contacts.length < cached.total
-              ? `local:${cached.page + 1}`
-              : null
-            : cached.contacts.length >= cached.page * PAGE_SIZE
-              ? `local:${cached.page + 1}`
-              : null
-          : "resume"
+      setHasNextPage(
+        cached.total != null
+          ? cached.page * PAGE_SIZE < cached.total
+          : cached.contacts.length >= PAGE_SIZE
       );
       setLoading(false);
       return;
     }
 
-    // Load local DB immediately — don't wait for stats (stats run in parallel).
-    // If the DB is empty, fall back to Outlook once stats confirm that.
-    loadedKeyRef.current = key;
+    loadedKeyRef.current = cacheKey;
     useLocalRef.current = true;
     loadGenRef.current += 1;
-    setContacts([]);
-    setNextLink(null);
-    pageRef.current = 1;
-    loadContactsPage(null, false, true);
-  }, [auth?.connected, auth?.user_email, q, fundraisingTier, emailCountMin, reviewFilter, loadContactsPage]);
+    loadContactsPage(page, true);
+  }, [
+    auth?.connected,
+    auth?.user_email,
+    page,
+    debouncedQ,
+    fundraisingTier,
+    debouncedEmailCountMin,
+    reviewFilter,
+    loadContactsPage,
+    resetOutlookCursors,
+  ]);
 
   // If optimistic local load returned nothing and there is no synced data, use Outlook Graph.
   useEffect(() => {
     if (!auth?.connected || stats === null) return;
     if (useLocalRef.current && stats.external_contacts === 0 && contacts.length === 0 && !loading) {
-      const filters = currentFilters(q, fundraisingTier, emailCountMin, reviewFilter);
-      const key = JSON.stringify(filters);
-      loadedKeyRef.current = key;
+      const filters = currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter);
+      const cacheKey = `${JSON.stringify(filters)}|${page}`;
+      loadedKeyRef.current = cacheKey;
       useLocalRef.current = false;
       loadGenRef.current += 1;
-      pageRef.current = 1;
+      resetOutlookCursors();
       setTotal(null);
-      loadContactsPage(null, false, false);
+      setHasNextPage(false);
+      loadContactsPage(page, false);
     }
   }, [
     auth?.connected,
     stats,
     contacts.length,
     loading,
-    q,
+    page,
+    debouncedQ,
     fundraisingTier,
-    emailCountMin,
+    debouncedEmailCountMin,
     reviewFilter,
     loadContactsPage,
+    resetOutlookCursors,
   ]);
 
   useEffect(() => {
@@ -386,25 +428,35 @@ export default function HomePage() {
       const statsData = await refreshStats(true);
       if (status?.status !== "running") {
         if ((statsData?.external_contacts ?? 0) > 0) {
-          loadedKeyRef.current = JSON.stringify(
-            currentFilters(q, fundraisingTier, emailCountMin, reviewFilter)
-          );
+          const filters = currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter);
+          const cacheKey = `${JSON.stringify(filters)}|1`;
+          loadedKeyRef.current = cacheKey;
+          filterKeyRef.current = JSON.stringify(filters);
           loadGenRef.current += 1;
-          pageRef.current = 1;
-          setContacts([]);
+          resetOutlookCursors();
           clearContactCache();
-          loadContactsPage(null, false, true);
+          useLocalRef.current = true;
+          setContacts([]);
+          setPage(1);
+          loadContactsPage(1, true);
         }
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [sync, refreshStats, loadContactsPage, q, fundraisingTier, emailCountMin, reviewFilter]);
-
-  const hasMore = !!nextLink;
+  }, [
+    sync,
+    refreshStats,
+    loadContactsPage,
+    debouncedQ,
+    fundraisingTier,
+    debouncedEmailCountMin,
+    reviewFilter,
+    resetOutlookCursors,
+  ]);
 
   const filteredContacts = useMemo(() => {
     if (dataSource === "local") return contacts;
-    const minEmails = emailCountMin.trim() === "" ? null : Number(emailCountMin);
+    const minEmails = debouncedEmailCountMin === "" ? null : Number(debouncedEmailCountMin);
     return contacts.filter((contact) => {
       if (fundraisingTier && (contact.fundraising_relevance_tier || "low") !== fundraisingTier) {
         return false;
@@ -417,26 +469,59 @@ export default function HomePage() {
       }
       return true;
     });
-  }, [contacts, dataSource, fundraisingTier, emailCountMin, reviewFilter]);
+  }, [contacts, dataSource, fundraisingTier, debouncedEmailCountMin, reviewFilter]);
 
-  const filtersActive = Boolean(fundraisingTier || emailCountMin.trim() || reviewFilter);
+  const filtersActive = Boolean(
+    debouncedQ || fundraisingTier || debouncedEmailCountMin || reviewFilter
+  );
+  const totalPages =
+    total != null && total > 0 ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : null;
+  const rangeFrom = contacts.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeTo = contacts.length === 0 ? 0 : (page - 1) * PAGE_SIZE + contacts.length;
+  const canGoPrev = page > 1 && !loading && !pageLoading;
+  const canGoNext = hasNextPage && !loading && !pageLoading;
+  const [pageInput, setPageInput] = useState(String(page));
 
   useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const root = tableWrapRef.current;
-    if (!sentinel || !root || !hasMore || loading || loadingMore || !auth?.connected) return;
+    setPageInput(String(page));
+  }, [page]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting || !nextLink) return;
-        const cursor = nextLink === "resume" ? null : nextLink;
-        loadContactsPage(cursor, true);
-      },
-      { root, rootMargin: "200px", threshold: 0 }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, nextLink, loadContactsPage, auth?.connected]);
+  function goToPage(nextPage: number) {
+    if (loading || pageLoading) return;
+    const maxPage = totalPages ?? (hasNextPage ? page + 1 : page);
+    const target = Math.min(Math.max(1, Math.floor(nextPage)), maxPage);
+    if (target === page) {
+      setPageInput(String(page));
+      return;
+    }
+    // Outlook cursor pagination only has links for visited pages (+ next).
+    if (dataSource === "outlook" && target > page) {
+      const known = outlookCursorsRef.current.has(target);
+      const isNext = target === page + 1 && hasNextPage;
+      if (!known && !isNext) {
+        setPageInput(String(page));
+        return;
+      }
+    }
+    setPage(target);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  function submitPageInput() {
+    const parsed = Number(pageInput.trim());
+    if (!Number.isFinite(parsed)) {
+      setPageInput(String(page));
+      return;
+    }
+    goToPage(parsed);
+  }
+
+  function updateFilter<T>(setter: (value: T) => void, value: T) {
+    setter(value);
+    if (page !== 1) setPage(1);
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -474,11 +559,13 @@ export default function HomePage() {
       clearContactCache();
       setAuth({ connected: false, user_email: null });
       setContacts([]);
-      setNextLink(null);
+      setHasNextPage(false);
       setTotal(null);
       setStats(null);
       setSync(null);
       setSelected(null);
+      setPage(1);
+      resetOutlookCursors();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disconnect");
     } finally {
@@ -644,7 +731,7 @@ export default function HomePage() {
   }
 
   const isSyncing = syncing || sync?.status === "running";
-  const pageBusy = Boolean(auth?.connected && (loading || isSyncing));
+  const pageBusy = Boolean(auth?.connected && (isSyncing || (loading && contacts.length === 0)));
 
   useEffect(() => {
     if (!pageBusy) return;
@@ -668,7 +755,7 @@ export default function HomePage() {
   const syncTotal = stats?.graph_sent_total ?? null;
   const syncFetched = sync?.status === "running" ? sync.messages_fetched : 0;
   const loadTotal = total ?? stats?.external_contacts ?? null;
-  const loadCurrent = contacts.length;
+  const loadCurrent = rangeTo;
 
   const busyProgressPct =
     sync?.status === "running" && syncTotal && syncTotal > 0
@@ -769,10 +856,6 @@ export default function HomePage() {
               {stats.graph_sent_total != null ? ` / ${stats.graph_sent_total.toLocaleString()}` : ""}
             </div>
           </div>
-          <div className="stat-card">
-            <div className="label">Showing in table</div>
-            <div className="value">{filteredContacts.length.toLocaleString()}</div>
-          </div>
         </div>
       )}
 
@@ -788,7 +871,7 @@ export default function HomePage() {
               />
               <select
                 value={fundraisingTier}
-                onChange={(e) => setFundraisingTier(e.target.value)}
+                onChange={(e) => updateFilter(setFundraisingTier, e.target.value)}
                 disabled={!auth?.connected || pageBusy}
               >
                 <option value="">All relevance</option>
@@ -805,7 +888,7 @@ export default function HomePage() {
               />
               <select
                 value={reviewFilter}
-                onChange={(e) => setReviewFilter(e.target.value)}
+                onChange={(e) => updateFilter(setReviewFilter, e.target.value)}
                 disabled={!auth?.connected || pageBusy}
               >
                 <option value="">All review status</option>
@@ -816,7 +899,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="table-wrap" ref={tableWrapRef}>
+          <div className={`table-wrap${pageLoading ? " table-wrap-loading" : ""}`}>
             <table>
               <thead>
                 <tr>
@@ -849,88 +932,85 @@ export default function HomePage() {
                   </tr>
                 ) : contacts.length === 0 ? (
                   <tr>
-                    <td colSpan={11}>No external contacts found in Sent Items.</td>
+                    <td colSpan={11}>
+                      {filtersActive
+                        ? "No contacts match the current filters."
+                        : "No external contacts found in Sent Items."}
+                    </td>
                   </tr>
                 ) : filteredContacts.length === 0 ? (
                   <tr>
                     <td colSpan={11}>No contacts match the current filters.</td>
                   </tr>
                 ) : (
-                  <>
-                    {filteredContacts.map((contact, index) => (
-                      <tr
-                        key={contact.id}
-                        onClick={() => openContact(contact)}
-                        style={{ cursor: "pointer" }}
-                        className={rowClass(contact)}
-                        aria-selected={selected?.id === contact.id}
-                      >
-                        <td className="serial">{contact.list_number ?? index + 1}</td>
-                        <td>{contact.full_name || "—"}</td>
-                        <td className="overflow-td">{contact.primary_email}</td>
-                        <td>{contact.company_name || "—"}</td>
-                        <td>{formatDate(contact.last_contacted_at)}</td>
-                        <td>
-                          {contact.email_count} / {contact.thread_count}
-                        </td>
-                        <td>
-                          <span className={tierClass(contact.fundraising_relevance_tier)}>
-                            {contact.fundraising_relevance_tier || "low"} ({contact.fundraising_relevance_score})
-                          </span>
-                        </td>
-                        <td onClick={(e) => e.stopPropagation()}>
-                          <div className="review-actions">
-                            <span className={reviewClass(contact.review_status)}>{contact.review_status}</span>
-                            <button
-                              className="review-btn approve"
-                              title="Approve — email later"
-                              onClick={() => setReviewStatus(contact, "approved")}
-                            >
-                              ✓
-                            </button>
-                            <button
-                              className="review-btn deny"
-                              title="Deny — not interested"
-                              onClick={() => setReviewStatus(contact, "denied")}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="chips">
-                            {(contact.detected_topics || []).slice(0, 3).map((topic) => (
-                              <span className="chip" key={topic}>
-                                {topic}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="preview">{contact.last_subject || "—"}</td>
-                        <td>
-                          {contact.latest_outlook_weblink ? (
-                            <a
-                              href={contact.latest_outlook_weblink}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              Open
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {hasMore && (
-                      <tr ref={sentinelRef}>
-                        <td colSpan={11} className="load-more">
-                          {loadingMore ? "Loading more…" : "Scroll for more"}
-                        </td>
-                      </tr>
-                    )}
-                  </>
+                  filteredContacts.map((contact, index) => (
+                    <tr
+                      key={contact.id}
+                      onClick={() => openContact(contact)}
+                      style={{ cursor: "pointer" }}
+                      className={rowClass(contact)}
+                      aria-selected={selected?.id === contact.id}
+                    >
+                      <td className="serial">
+                        {contact.list_number ?? (page - 1) * PAGE_SIZE + index + 1}
+                      </td>
+                      <td>{contact.full_name || "—"}</td>
+                      <td className="overflow-td">{contact.primary_email}</td>
+                      <td>{contact.company_name || "—"}</td>
+                      <td>{formatDate(contact.last_contacted_at)}</td>
+                      <td>
+                        {contact.email_count} / {contact.thread_count}
+                      </td>
+                      <td>
+                        <span className={tierClass(contact.fundraising_relevance_tier)}>
+                          {contact.fundraising_relevance_tier || "low"} ({contact.fundraising_relevance_score})
+                        </span>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="review-actions">
+                          <span className={reviewClass(contact.review_status)}>{contact.review_status}</span>
+                          <button
+                            className="review-btn approve"
+                            title="Approve — email later"
+                            onClick={() => setReviewStatus(contact, "approved")}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            className="review-btn deny"
+                            title="Deny — not interested"
+                            onClick={() => setReviewStatus(contact, "denied")}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="chips">
+                          {(contact.detected_topics || []).slice(0, 3).map((topic) => (
+                            <span className="chip" key={topic}>
+                              {topic}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="preview">{contact.last_subject || "—"}</td>
+                      <td>
+                        {contact.latest_outlook_weblink ? (
+                          <a
+                            href={contact.latest_outlook_weblink}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Open
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
@@ -939,15 +1019,56 @@ export default function HomePage() {
           {auth?.connected && (
             <div className="pagination">
               <span>
-                {dataSource === "local" && total != null
-                  ? filtersActive || q
-                    ? `Showing ${filteredContacts.length.toLocaleString()} of ${total.toLocaleString()} contacts`
-                    : `Showing ${contacts.length.toLocaleString()} of ${total.toLocaleString()} contacts`
-                  : filtersActive
-                    ? `Showing ${filteredContacts.length.toLocaleString()} of ${contacts.length.toLocaleString()} loaded contacts`
-                    : `Showing ${contacts.length.toLocaleString()} contacts from Sent Items`}
+                {contacts.length === 0
+                  ? filtersActive
+                    ? "No matching contacts"
+                    : "No contacts to show"
+                  : total != null
+                    ? `Showing ${rangeFrom.toLocaleString()}–${rangeTo.toLocaleString()} of ${total.toLocaleString()}${
+                        filtersActive ? " matching" : ""
+                      } contacts`
+                    : `Showing ${rangeFrom.toLocaleString()}–${rangeTo.toLocaleString()} on this page`}
+                {pageLoading ? " · Loading…" : ""}
               </span>
-              {!hasMore && contacts.length > 0 && <span>End of list reached</span>}
+              <div className="pagination-controls">
+                <button
+                  type="button"
+                  className="button"
+                  disabled={!canGoPrev}
+                  onClick={() => goToPage(page - 1)}
+                >
+                  Previous
+                </button>
+                <label className="pagination-goto">
+                  <span>Page</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={totalPages ?? undefined}
+                    value={pageInput}
+                    disabled={loading || pageLoading || contacts.length === 0}
+                    onChange={(e) => setPageInput(e.target.value)}
+                    onBlur={submitPageInput}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        submitPageInput();
+                      }
+                    }}
+                    aria-label="Go to page"
+                  />
+                  {totalPages != null && <span>of {totalPages.toLocaleString()}</span>}
+                </label>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={!canGoNext}
+                  onClick={() => goToPage(page + 1)}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div>
