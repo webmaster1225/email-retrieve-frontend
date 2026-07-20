@@ -1,37 +1,31 @@
 "use client";
 
-import { useMemo } from "react";
-import { Nav } from "@/components/Nav";
-import { CompassNav } from "@/components/compass/CompassNav";
+import { useCompassLive } from "@/lib/compass/useCompassLive";
 import { CompassHome } from "@/components/compass/CompassHome";
 import { CampaignWorkspace } from "@/components/compass/CampaignWorkspace";
-import { useCompassPrototype } from "@/lib/compass/useCompassPrototype";
+import { CompassNav } from "@/components/compass/CompassNav";
+import { Nav } from "@/components/Nav";
 import { isWorkspaceStage } from "@/lib/compass/stages";
 
-const PROTOTYPE_ENABLED =
-  process.env.NEXT_PUBLIC_COMPASS_PROTOTYPE === "true" ||
-  process.env.NEXT_PUBLIC_COMPASS_PROTOTYPE === "1";
+const LIVE_ENABLED =
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "true" ||
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "1";
 
 export default function CompassPage() {
-  const proto = useCompassPrototype();
-
-  const enabled = useMemo(() => PROTOTYPE_ENABLED, []);
-
-  if (!enabled) {
+  if (!LIVE_ENABLED) {
     return (
       <div className="page">
         <div className="topbar">
           <div>
-            <h1>Compass prototype</h1>
-            <p className="subtitle">Phase 1 UX prototype is disabled</p>
+            <h1>Compass</h1>
+            <p className="subtitle">Compass is disabled</p>
           </div>
           <Nav />
         </div>
         <div className="panel">
           <p>
-            Set <code>NEXT_PUBLIC_COMPASS_PROTOTYPE=true</code> in{" "}
-            <code>frontend/.env</code> and restart the Next.js dev server to enable the
-            Northwyn walkthrough.
+            Set <code>NEXT_PUBLIC_COMPASS_LIVE=true</code> in <code>frontend/.env</code>, connect
+            mailboxes in Settings, and restart the Next.js dev server.
           </p>
           <p>
             <a href="/">Back to Contacts</a>
@@ -41,25 +35,37 @@ export default function CompassPage() {
     );
   }
 
+  return <CompassApp />;
+}
+
+function CompassApp() {
+  const compass = useCompassLive();
+
   return (
     <div className="compass-page">
       <CompassNav
         showLegacyLink
-        onStub={(label) => proto.showToast(`${label} — coming in a later phase`)}
+        onStub={(label) => compass.showToast(`${label} — coming in a later phase`)}
+        onCampaigns={() => compass.openCampaignsList()}
       />
-      {proto.toast ? <div className="compass-toast">{proto.toast}</div> : null}
+      {compass.toast ? <div className="compass-toast">{compass.toast}</div> : null}
+      <p className="compass-live-banner subtitle" style={{ padding: "0 1.25rem", margin: 0 }}>
+        Live campaigns — candidates, drafts, and sends come from your synced mailboxes.
+      </p>
 
-      {proto.stage === "home" ? (
+      {compass.stage === "home" ? (
         <CompassHome
-          objective={proto.objective}
-          onObjectiveChange={proto.setObjective}
-          includedAccounts={proto.includedAccounts}
-          onToggleAccount={proto.toggleAccount}
-          onStart={proto.startCampaign}
-          onStub={(label) => proto.showToast(`${label} — coming in a later phase`)}
+          objective={compass.objective}
+          onObjectiveChange={compass.setObjective}
+          includedAccounts={compass.includedAccounts}
+          onToggleAccount={compass.toggleAccount}
+          onStart={compass.startCampaign}
+          onStub={(label) => compass.showToast(`${label} — coming in a later phase`)}
+          onLiveAccountsLoaded={compass.applyLiveAccountDefaults}
+          onOpenCampaign={(id) => compass.openCampaignFromList(id)}
         />
-      ) : isWorkspaceStage(proto.stage) ? (
-        <CampaignWorkspace proto={proto} />
+      ) : isWorkspaceStage(compass.stage) ? (
+        <CampaignWorkspace compass={compass} />
       ) : null}
     </div>
   );

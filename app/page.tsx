@@ -6,6 +6,7 @@ import {
   Contact,
   ExchangeEmail,
   formatDate,
+  MailboxAccount,
   OutlookContact,
   RelationshipAnalysis,
   RelationshipResult,
@@ -28,6 +29,25 @@ import { RelevanceTierHelp } from "@/lib/helpText";
 const PAGE_SIZE = 50;
 const OUTLOOK_PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
+
+const COMPASS_LIVE =
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "true" ||
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "1";
+
+const ACCOUNTS_UI =
+  process.env.NEXT_PUBLIC_ACCOUNTS_UI === "true" ||
+  process.env.NEXT_PUBLIC_ACCOUNTS_UI === "1";
+
+function isMailboxSelectable(account: MailboxAccount) {
+  return account.connected && account.status !== "reconnect_needed";
+}
+
+function mailboxStatusLabel(account: MailboxAccount) {
+  if (account.status === "syncing") return "Syncing";
+  if (account.status === "reconnect_needed") return "Reconnect needed";
+  if (account.connected) return "Connected";
+  return "Disconnected";
+}
 
 const USEFULNESS_LABELS: Record<string, string> = {
   business_development: "Business dev",
@@ -87,16 +107,28 @@ function contactToRow(contact: Contact): OutlookContact {
   };
 }
 
-function currentFilters(q: string, fundraisingTier: string, emailCountMin: string, reviewFilter: string) {
-  return { q, fundraisingTier, emailCountMin, reviewFilter };
+function currentFilters(
+  q: string,
+  fundraisingTier: string,
+  emailCountMin: string,
+  reviewFilter: string,
+  accountId: string | null
+) {
+  return { q, fundraisingTier, emailCountMin, reviewFilter, accountId };
 }
 
 export default function HomePage() {
   const [auth, setAuth] = useState<{ connected: boolean; user_email: string | null } | null>(null);
+  const [accounts, setAccounts] = useState<MailboxAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [accountsReady, setAccountsReady] = useState(!ACCOUNTS_UI);
   const [contacts, setContacts] = useState<OutlookContact[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [accountStats, setAccountStats] = useState<
+    Record<string, Pick<Stats, "external_contacts" | "synced_messages" | "graph_sent_total">>
+  >({});
   const [sync, setSync] = useState<SyncRun | null>(null);
   const [dataSource, setDataSource] = useState<"local" | "outlook">("outlook");
   const [selected, setSelected] = useState<OutlookContact | null>(null);
@@ -104,7 +136,8 @@ export default function HomePage() {
   const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [seniority, setSeniority] = useState<SeniorityResult | null>(null);
   const [seniorityLoading, setSeniorityLoading] = useState(false);
@@ -129,6 +162,23 @@ export default function HomePage() {
   const loadedKeyRef = useRef<string | null>(null);
   const outlookCursorsRef = useRef<Map<number, string | null>>(new Map([[1, null]]));
   const filterKeyRef = useRef<string | null>(null);
+  const selectedAccountIdRef = useRef<string | null>(null);
+  const syncAccountIdRef = useRef<string | null>(null);
+
+  const selectedAccount = useMemo(
+    () => accounts.find((a) => a.id === selectedAccountId) ?? null,
+    [accounts, selectedAccountId]
+  );
+  const mailboxConnected = ACCOUNTS_UI
+    ? Boolean(selectedAccount && isMailboxSelectable(selectedAccount))
+    : Boolean(auth?.connected);
+  const activeMailboxEmail = ACCOUNTS_UI
+    ? selectedAccount?.email ?? null
+    : auth?.user_email ?? null;
+
+  useEffect(() => {
+    selectedAccountIdRef.current = selectedAccountId;
+  }, [selectedAccountId]);
 
   useEffect(() => {
     contactsRef.current = contacts;
@@ -178,10 +228,70 @@ export default function HomePage() {
     }
   }, []);
 
+  const refreshAccounts = useCallback(async () => {
+    if (!ACCOUNTS_UI) return [];
+    try {
+      const rows = await api.listAccounts();
+      setAccounts(rows);
+      setSelectedAccountId((prev) => {
+        if (prev) {
+          const still = rows.find((a) => a.id === prev);
+          if (still && isMailboxSelectable(still)) return prev;
+        }
+        const firstConnected = rows.find(isMailboxSelectable);
+        return firstConnected?.id ?? null;
+      });
+      const connected = rows.filter(isMailboxSelectable);
+      if (connected.length > 0) {
+        const entries = await Promise.all(
+          connected.map(async (account) => {
+            try {
+              const s = await api.stats(false, account.id);
+              return [
+                account.id,
+                {
+                  external_contacts: s.external_contacts,
+                  synced_messages: s.synced_messages,
+                  graph_sent_total: s.graph_sent_total,
+                },
+              ] as const;
+            } catch {
+              return null;
+            }
+          })
+        );
+        setAccountStats((prev) => {
+          const next = { ...prev };
+          for (const entry of entries) {
+            if (entry) next[entry[0]] = entry[1];
+          }
+          return next;
+        });
+      }
+      return rows;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load email accounts");
+      return [];
+    } finally {
+      setAccountsReady(true);
+    }
+  }, []);
+
   const refreshStats = useCallback(async (includeGraphTotal = false) => {
     try {
-      const statsData = await api.stats(includeGraphTotal);
+      const accountId = ACCOUNTS_UI ? selectedAccountIdRef.current : null;
+      const statsData = await api.stats(includeGraphTotal, accountId);
       setStats(statsData);
+      if (accountId) {
+        setAccountStats((prev) => ({
+          ...prev,
+          [accountId]: {
+            external_contacts: statsData.external_contacts,
+            synced_messages: statsData.synced_messages,
+            graph_sent_total: statsData.graph_sent_total,
+          },
+        }));
+      }
       if (statsData.external_contacts > 0) {
         setTotal(statsData.external_contacts);
       } else if (statsData.graph_sent_total != null) {
@@ -201,11 +311,17 @@ export default function HomePage() {
         page: pageNum,
         total: totalCount,
         source,
-        filters: currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter),
-        userEmail: auth?.user_email ?? null,
+        filters: currentFilters(
+          debouncedQ,
+          fundraisingTier,
+          debouncedEmailCountMin,
+          reviewFilter,
+          selectedAccountIdRef.current
+        ),
+        userEmail: activeMailboxEmail,
       });
     },
-    [auth?.user_email, debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter]
+    [activeMailboxEmail, debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter]
   );
 
   const resetOutlookCursors = useCallback(() => {
@@ -237,6 +353,7 @@ export default function HomePage() {
             if (!Number.isNaN(minEmails)) params.email_count_min = minEmails;
           }
           if (reviewFilter) params.review_status = reviewFilter;
+          if (selectedAccountIdRef.current) params.account_id = selectedAccountIdRef.current;
 
           const contactData = await api.contacts(params);
           if (gen !== loadGenRef.current) return;
@@ -292,16 +409,22 @@ export default function HomePage() {
 
   useEffect(() => {
     refreshAuth();
-  }, [refreshAuth]);
+    refreshAccounts();
+  }, [refreshAuth, refreshAccounts]);
 
   useEffect(() => {
-    if (!auth?.connected) return;
+    if (!mailboxConnected) return;
     refreshStats();
-    api.syncStatus().then(setSync).catch(() => {});
-  }, [auth?.connected, refreshStats]);
+    if (ACCOUNTS_UI && selectedAccountId) {
+      api.accountSyncStatus(selectedAccountId).then(setSync).catch(() => {});
+    } else {
+      api.syncStatus().then(setSync).catch(() => {});
+    }
+  }, [mailboxConnected, selectedAccountId, refreshStats]);
 
   useEffect(() => {
-    if (!auth?.connected) {
+    if (!mailboxConnected) {
+      if (ACCOUNTS_UI && !accountsReady) return;
       setContacts([]);
       setHasNextPage(false);
       setTotal(null);
@@ -315,7 +438,13 @@ export default function HomePage() {
       return;
     }
 
-    const filters = currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter);
+    const filters = currentFilters(
+      debouncedQ,
+      fundraisingTier,
+      debouncedEmailCountMin,
+      reviewFilter,
+      selectedAccountId
+    );
     const filterKey = JSON.stringify(filters);
     const filtersChanged = filterKeyRef.current !== filterKey;
 
@@ -332,7 +461,7 @@ export default function HomePage() {
     const cacheKey = `${filterKey}|${page}`;
     if (loadedKeyRef.current === cacheKey) return;
 
-    const cached = loadContactCache(auth.user_email, filters);
+    const cached = loadContactCache(activeMailboxEmail, filters);
     if (cached && cached.page === page) {
       loadedKeyRef.current = cacheKey;
       loadGenRef.current += 1;
@@ -355,8 +484,10 @@ export default function HomePage() {
     loadGenRef.current += 1;
     loadContactsPage(page, true);
   }, [
-    auth?.connected,
-    auth?.user_email,
+    mailboxConnected,
+    accountsReady,
+    activeMailboxEmail,
+    selectedAccountId,
     page,
     debouncedQ,
     fundraisingTier,
@@ -368,9 +499,17 @@ export default function HomePage() {
 
   // If optimistic local load returned nothing and there is no synced data, use Outlook Graph.
   useEffect(() => {
-    if (!auth?.connected || stats === null) return;
+    if (!mailboxConnected || stats === null) return;
+    // Live Graph is only wired for the Edge mailbox.
+    if (ACCOUNTS_UI && selectedAccountId && selectedAccountId !== "edge") return;
     if (useLocalRef.current && stats.external_contacts === 0 && contacts.length === 0 && !loading) {
-      const filters = currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter);
+      const filters = currentFilters(
+        debouncedQ,
+        fundraisingTier,
+        debouncedEmailCountMin,
+        reviewFilter,
+        selectedAccountId
+      );
       const cacheKey = `${JSON.stringify(filters)}|${page}`;
       loadedKeyRef.current = cacheKey;
       useLocalRef.current = false;
@@ -381,7 +520,8 @@ export default function HomePage() {
       loadContactsPage(page, false);
     }
   }, [
-    auth?.connected,
+    mailboxConnected,
+    selectedAccountId,
     stats,
     contacts.length,
     loading,
@@ -395,20 +535,31 @@ export default function HomePage() {
   ]);
 
   useEffect(() => {
-    if (!auth?.connected || !stats || stats.external_contacts > 0 || stats.synced_messages > 0) return;
+    if (!mailboxConnected || !stats || stats.external_contacts > 0 || stats.synced_messages > 0) return;
     if (sync?.status === "running") return;
+    // Auto-start sync only for legacy single-mailbox / Edge flow.
+    if (ACCOUNTS_UI && selectedAccountId && selectedAccountId !== "edge") return;
 
     let cancelled = false;
     (async () => {
-      const status = await api.syncStatus();
+      const status = ACCOUNTS_UI && selectedAccountId
+        ? await api.accountSyncStatus(selectedAccountId)
+        : await api.syncStatus();
       if (cancelled) return;
       if (status?.status === "running") {
         setSync(status);
         return;
       }
       try {
-        const run = await api.startSync();
-        if (!cancelled) setSync(run);
+        const run =
+          ACCOUNTS_UI && selectedAccountId
+            ? await api.syncAccount(selectedAccountId)
+            : await api.startSync();
+        if (!cancelled) {
+          syncAccountIdRef.current = selectedAccountId || "edge";
+          setSyncingId(selectedAccountId || "edge");
+          setSync(run);
+        }
       } catch {
         // User can start sync manually.
       }
@@ -417,18 +568,40 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [auth?.connected, stats?.external_contacts, stats?.synced_messages, sync?.status]);
+  }, [mailboxConnected, selectedAccountId, stats?.external_contacts, stats?.synced_messages, sync?.status]);
 
   useEffect(() => {
     if (!sync || sync.status !== "running") return;
     const timer = setInterval(async () => {
-      const status = await api.syncStatus();
+      const syncAccountId = syncAccountIdRef.current || selectedAccountIdRef.current;
+      const status =
+        ACCOUNTS_UI && syncAccountId
+          ? await api.accountSyncStatus(syncAccountId)
+          : await api.syncStatus();
       setSync(status);
-      // Fetch the live Graph total only while syncing so progress "X / Y" shows.
-      const statsData = await refreshStats(true);
+      if (ACCOUNTS_UI) void refreshAccounts();
+      // Refresh selected-mailbox stats while syncing (when that mailbox is selected).
+      if (!syncAccountId || syncAccountId === selectedAccountIdRef.current) {
+        await refreshStats(true);
+      }
       if (status?.status !== "running") {
-        if ((statsData?.external_contacts ?? 0) > 0) {
-          const filters = currentFilters(debouncedQ, fundraisingTier, debouncedEmailCountMin, reviewFilter);
+        syncAccountIdRef.current = null;
+        setSyncingId(null);
+        const statsData =
+          !syncAccountId || syncAccountId === selectedAccountIdRef.current
+            ? await refreshStats(false)
+            : null;
+        if (
+          syncAccountId === selectedAccountIdRef.current &&
+          (statsData?.external_contacts ?? 0) > 0
+        ) {
+          const filters = currentFilters(
+            debouncedQ,
+            fundraisingTier,
+            debouncedEmailCountMin,
+            reviewFilter,
+            selectedAccountIdRef.current
+          );
           const cacheKey = `${JSON.stringify(filters)}|1`;
           loadedKeyRef.current = cacheKey;
           filterKeyRef.current = JSON.stringify(filters);
@@ -446,6 +619,7 @@ export default function HomePage() {
   }, [
     sync,
     refreshStats,
+    refreshAccounts,
     loadContactsPage,
     debouncedQ,
     fundraisingTier,
@@ -523,31 +697,41 @@ export default function HomePage() {
     if (page !== 1) setPage(1);
   }
 
-  async function handleSync() {
-    setSyncing(true);
+  async function syncMailbox(account: MailboxAccount) {
+    if (!isMailboxSelectable(account)) return;
+    setSyncingId(account.id);
+    setError(null);
+    try {
+      const run = await api.syncAccount(account.id);
+      syncAccountIdRef.current = account.id;
+      setSync(run);
+      setAccounts((prev) =>
+        prev.map((a) =>
+          a.id === account.id ? { ...a, status: "syncing", plain_message: "Syncing…" } : a
+        )
+      );
+      if (account.id === selectedAccountIdRef.current) {
+        clearContactCache();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start sync");
+      setSyncingId(null);
+      syncAccountIdRef.current = null;
+    }
+  }
+
+  async function handleLegacySync() {
+    setSyncingId("edge");
     setError(null);
     try {
       const run = await api.startSync();
+      syncAccountIdRef.current = "edge";
       setSync(run);
       clearContactCache();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start sync");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function handleClearStuckSync() {
-    setSyncing(true);
-    setError(null);
-    try {
-      await api.failRunningSyncs();
-      const status = await api.syncStatus();
-      setSync(status);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to clear stuck sync");
-    } finally {
-      setSyncing(false);
+      setSyncingId(null);
+      syncAccountIdRef.current = null;
     }
   }
 
@@ -555,21 +739,69 @@ export default function HomePage() {
     setDisconnecting(true);
     setError(null);
     try {
-      await api.disconnect();
-      clearContactCache();
-      setAuth({ connected: false, user_email: null });
-      setContacts([]);
-      setHasNextPage(false);
-      setTotal(null);
-      setStats(null);
-      setSync(null);
-      setSelected(null);
-      setPage(1);
-      resetOutlookCursors();
+      if (ACCOUNTS_UI && selectedAccountId) {
+        await api.disconnectAccount(selectedAccountId);
+        clearContactCache();
+        setContacts([]);
+        setHasNextPage(false);
+        setTotal(null);
+        setStats(null);
+        setSync(null);
+        setSelected(null);
+        setPage(1);
+        resetOutlookCursors();
+        await refreshAccounts();
+        await refreshAuth();
+      } else {
+        await api.disconnect();
+        clearContactCache();
+        setAuth({ connected: false, user_email: null });
+        setContacts([]);
+        setHasNextPage(false);
+        setTotal(null);
+        setStats(null);
+        setSync(null);
+        setSelected(null);
+        setPage(1);
+        resetOutlookCursors();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disconnect");
     } finally {
       setDisconnecting(false);
+    }
+  }
+
+  function selectMailbox(account: MailboxAccount) {
+    if (!isMailboxSelectable(account)) return;
+    if (account.id === selectedAccountId) return;
+    setSelected(null);
+    setSelectedAccountId(account.id);
+    setPage(1);
+    loadedKeyRef.current = null;
+    filterKeyRef.current = null;
+    resetOutlookCursors();
+    clearContactCache();
+  }
+
+  async function connectMailbox(account: MailboxAccount) {
+    setConnectingId(account.id);
+    setError(null);
+    try {
+      if (account.id === "edge") {
+        window.location.href = api.loginUrl();
+        return;
+      }
+      const login = await api.accountLogin(account.id);
+      if (login.login_url) {
+        window.location.href = login.login_url;
+        return;
+      }
+      setError(login.error || "Connect failed — check Azure/Google app registration");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Connect failed");
+    } finally {
+      setConnectingId(null);
     }
   }
 
@@ -730,53 +962,8 @@ export default function HomePage() {
     return classes.join(" ");
   }
 
-  const isSyncing = syncing || sync?.status === "running";
-  const pageBusy = Boolean(auth?.connected && (isSyncing || (loading && contacts.length === 0)));
-
-  useEffect(() => {
-    if (!pageBusy) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [pageBusy]);
-
-  useEffect(() => {
-    if (pageBusy) setSelected(null);
-  }, [pageBusy]);
-
-  const busyTitle = isSyncing
-    ? sync?.status === "running"
-      ? `Syncing ${sync.sync_type === "inbox" ? "Inbox" : "Sent Items"}…`
-      : "Starting sync…"
-    : "Loading contacts…";
-
-  const syncTotal = stats?.graph_sent_total ?? null;
-  const syncFetched = sync?.status === "running" ? sync.messages_fetched : 0;
-  const loadTotal = total ?? stats?.external_contacts ?? null;
-  const loadCurrent = rangeTo;
-
-  const busyProgressPct =
-    sync?.status === "running" && syncTotal && syncTotal > 0
-      ? Math.min(100, Math.round((syncFetched / syncTotal) * 100))
-      : loading && loadCurrent > 0 && loadTotal && loadTotal > 0
-        ? Math.min(100, Math.round((loadCurrent / loadTotal) * 100))
-        : null;
-
-  const busyDetail =
-    sync?.status === "running"
-      ? `${syncFetched.toLocaleString()} messages fetched${
-          syncTotal ? ` of ${syncTotal.toLocaleString()}` : ""
-        }${busyProgressPct != null ? ` · ${busyProgressPct}%` : ""}`
-      : loading
-        ? loadCurrent > 0 && loadTotal && loadTotal > 0
-          ? `${Math.min(loadCurrent, loadTotal).toLocaleString()} of ${loadTotal.toLocaleString()} contacts`
-          : "Please wait while contacts load from the database."
-        : "Connecting to Outlook…";
-
   return (
-    <main className="page" aria-busy={pageBusy}>
+    <main className="page">
       <div className="header">
         <div>
           <Nav />
@@ -785,80 +972,197 @@ export default function HomePage() {
             {dataSource === "local"
               ? "Contacts from synced Sent Items — fast local database"
               : "Contacts from Outlook Sent Items — sync recommended for large mailboxes"}
-            {auth?.connected && auth.user_email ? ` · ${auth.user_email}` : ""}
+            {mailboxConnected && activeMailboxEmail ? ` · ${activeMailboxEmail}` : ""}
           </p>
         </div>
         <div className="actions">
-          {!auth?.connected ? (
-            <a className="button primary" href={api.loginUrl()}>
-              Connect Microsoft Outlook
-            </a>
+          {!mailboxConnected ? (
+            ACCOUNTS_UI ? (
+              <a className="button primary" href="/settings">
+                Connect email in Settings
+              </a>
+            ) : (
+              <a className="button primary" href={api.loginUrl()}>
+                Connect Microsoft Outlook
+              </a>
+            )
           ) : (
             <>
-              <button
-                onClick={handleSync}
-                disabled={pageBusy || !auth?.connected}
-              >
-                {sync?.status === "running"
-                  ? "Syncing…"
-                  : syncing
-                    ? "Starting sync…"
+              {!ACCOUNTS_UI ? (
+                <button
+                  onClick={handleLegacySync}
+                  disabled={syncingId !== null || !mailboxConnected}
+                >
+                  {sync?.status === "running" || syncingId
+                    ? "Syncing…"
                     : stats?.sync_complete
                       ? "Re-sync Sent Items"
                       : "Sync Sent Items"}
-              </button>
-              <button className="primary" onClick={handleDisconnect} disabled={disconnecting || pageBusy}>
-                {disconnecting ? "Disconnecting…" : "Disconnect Outlook"}
+                </button>
+              ) : null}
+              <button className="primary" onClick={handleDisconnect} disabled={disconnecting}>
+                {disconnecting ? "Disconnecting…" : ACCOUNTS_UI ? "Disconnect mailbox" : "Disconnect Outlook"}
               </button>
             </>
           )}
-          <a
-            className={`button${pageBusy ? " disabled" : ""}`}
-            href={pageBusy ? undefined : api.exportXlsxUrl()}
-            aria-disabled={pageBusy}
-            onClick={(e) => {
-              if (pageBusy) e.preventDefault();
-            }}
-          >
+          <a className="button" href={api.exportXlsxUrl()}>
             Export Excel
           </a>
-          <a
-            className={`button${pageBusy ? " disabled" : ""}`}
-            href={pageBusy ? undefined : api.exportCsvUrl()}
-            aria-disabled={pageBusy}
-            onClick={(e) => {
-              if (pageBusy) e.preventDefault();
-            }}
-          >
+          <a className="button" href={api.exportCsvUrl()}>
             Export CSV
           </a>
         </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
+      {COMPASS_LIVE && (
+        <div className="banner info">
+          Campaign approvals live in{" "}
+          <a href="/compass">
+            <strong>Compass</strong>
+          </a>
+          . This Relationships browser is read-only for approve/deny — use Compass for per-campaign
+          decisions.
+        </div>
+      )}
 
-      {auth?.connected && stats && stats.external_contacts === 0 && sync?.status !== "running" && (
+      {mailboxConnected && stats && stats.external_contacts === 0 && sync?.status !== "running" && (
         <div className="banner">
-          No contacts synced yet. Click <strong>Sync Sent Items</strong> to import your mailbox (first run may take 15–30+ minutes).
+          No contacts synced yet. Use the <strong>refresh</strong> icon on the mailbox to import Sent
+          Items (first run may take 15–30+ minutes).
         </div>
       )}
 
-      {auth?.connected && stats && (
-        <div className="stats">
-          <div className="stat-card">
-            <div className="label">External contacts</div>
-            <div className="value">{stats.external_contacts.toLocaleString()}</div>
-          </div>
-          <div className="stat-card">
-            <div className="label">Messages synced</div>
-            <div className="value">
-              {stats.synced_messages.toLocaleString()}
-              {stats.graph_sent_total != null ? ` / ${stats.graph_sent_total.toLocaleString()}` : ""}
+      <div className={`contacts-shell${ACCOUNTS_UI ? " has-mailbox-sidebar" : ""}`}>
+        {ACCOUNTS_UI ? (
+          <aside className="mailbox-sidebar" aria-label="Email accounts">
+            <div className="mailbox-sidebar-head">
+              <h2>Mailboxes</h2>
+              <a href="/settings" className="mailbox-sidebar-link">
+                Settings
+              </a>
             </div>
-          </div>
-        </div>
-      )}
+            <ul className="mailbox-list">
+              {accounts.length === 0 ? (
+                <li className="mailbox-empty">
+                  {accountsReady ? "No mailboxes configured." : "Loading accounts…"}
+                </li>
+              ) : (
+                accounts.map((account) => {
+                  const selectable = isMailboxSelectable(account);
+                  const isSelected = account.id === selectedAccountId;
+                  const needsConnect = !selectable;
+                  const mailboxStat = accountStats[account.id];
+                  const showSelectedStats =
+                    isSelected && stats
+                      ? {
+                          external_contacts: stats.external_contacts,
+                          synced_messages: stats.synced_messages,
+                          graph_sent_total: stats.graph_sent_total,
+                        }
+                      : mailboxStat;
+                  const isAccountSyncing =
+                    syncingId === account.id ||
+                    account.status === "syncing" ||
+                    (sync?.status === "running" && sync.account_id === account.id);
+                  return (
+                    <li key={account.id}>
+                      <div
+                        className={`mailbox-item${isSelected ? " is-selected" : ""}${
+                          selectable ? "" : " is-disconnected"
+                        }`}
+                      >
+                        <div className="mailbox-item-header">
+                          <button
+                            type="button"
+                            className="mailbox-item-select"
+                            disabled={!selectable}
+                            aria-pressed={isSelected}
+                            aria-disabled={!selectable}
+                            title={
+                              selectable
+                                ? `Show contacts for ${account.email}`
+                                : "Connect this mailbox to select it"
+                            }
+                            onClick={() => selectMailbox(account)}
+                          >
+                            <span className="mailbox-item-top">
+                              <span className="mailbox-item-name">
+                                {selectable ? "✓" : "○"} {account.display_name}
+                              </span>
+                            </span>
+                            <span className="mailbox-item-email">&lt;{account.email}&gt;</span>
+                            {showSelectedStats ? (
+                              <span className="mailbox-item-metrics">
+                                <span>
+                                  {showSelectedStats.external_contacts.toLocaleString()} contacts
+                                </span>{" / "}
+                                <span>
+                                  {showSelectedStats.synced_messages.toLocaleString()}
+                                  {showSelectedStats.graph_sent_total != null
+                                    ? ` / ${showSelectedStats.graph_sent_total.toLocaleString()}`
+                                    : ""}{" "}
+                                  messages
+                                </span>
+                              </span>
+                            ) : null}
+                            <span className="mailbox-item-status">
+                              <span
+                                className={`mailbox-item-badge${
+                                  selectable ? " is-connected" : " is-offline"
+                                }`}
+                              >
+                                {mailboxStatusLabel(account)}
+                              </span>
+                              {account.last_sync_plain ? (
+                                <span className="mailbox-item-sync">
+                                  {account.last_sync_plain.replace("up to date ", "")}
+                                </span>
+                              ) : null}
+                            </span>
+                          </button>
+                          
+                        </div>
+                        {needsConnect ? (
+                          <button
+                            type="button"
+                            className="button secondary mailbox-connect-btn"
+                            disabled={connectingId === account.id}
+                            onClick={() => connectMailbox(account)}
+                          >
+                            {connectingId === account.id
+                              ? "Connecting…"
+                              : account.status === "reconnect_needed"
+                                ? "Reconnect"
+                                : "Connect"}
+                          </button>
+                        ) : null}
+                        {selectable ? (
+                          <button
+                            type="button"
+                            className={`button primary mailbox-connect-btn mailbox-sync-btn${isAccountSyncing ? " is-spinning" : ""}`}
+                            disabled={isAccountSyncing}
+                            onClick={() => syncMailbox(account)}
+                            title={isAccountSyncing ? "Syncing…" : `Sync ${account.display_name}`}
+                            aria-label={
+                              isAccountSyncing
+                                ? `Syncing ${account.display_name}`
+                                : `Sync ${account.display_name}`
+                            }
+                          >
+                            Sync
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+          </aside>
+        ) : null}
 
+        <div className="contacts-main">
       <div className="layout-with-drawer">
         <div style={{ display: "contents", flexDirection: "column", gap: 12 }}>
           <div className="panel">
@@ -867,12 +1171,12 @@ export default function HomePage() {
                 placeholder="Search name, email, or company…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                disabled={!auth?.connected || pageBusy}
+                disabled={!mailboxConnected}
               />
               <select
                 value={fundraisingTier}
                 onChange={(e) => updateFilter(setFundraisingTier, e.target.value)}
-                disabled={!auth?.connected || pageBusy}
+                disabled={!mailboxConnected}
               >
                 <option value="">All relevance</option>
                 <option value="high">High</option>
@@ -883,13 +1187,13 @@ export default function HomePage() {
                 placeholder="Min emails"
                 value={emailCountMin}
                 onChange={(e) => setEmailCountMin(e.target.value)}
-                disabled={!auth?.connected || pageBusy}
+                disabled={!mailboxConnected}
                 inputMode="numeric"
               />
               <select
                 value={reviewFilter}
                 onChange={(e) => updateFilter(setReviewFilter, e.target.value)}
-                disabled={!auth?.connected || pageBusy}
+                disabled={!mailboxConnected}
               >
                 <option value="">All review status</option>
                 <option value="pending">To review</option>
@@ -903,7 +1207,6 @@ export default function HomePage() {
             <table>
               <thead>
                 <tr>
-                  <th>#</th>
                   <th>Name</th>
                   <th>Email</th>
                   <th>Company</th>
@@ -922,9 +1225,13 @@ export default function HomePage() {
                 </tr>
               </thead>
               <tbody>
-                {!auth?.connected ? (
+                {!mailboxConnected ? (
                   <tr>
-                    <td colSpan={11}>Connect Microsoft Outlook to load contacts from Sent Items.</td>
+                    <td colSpan={11}>
+                      {ACCOUNTS_UI
+                        ? "Select a connected mailbox on the left, or connect one in Settings."
+                        : "Connect Microsoft Outlook to load contacts from Sent Items."}
+                    </td>
                   </tr>
                 ) : loading && contacts.length === 0 ? (
                   <tr>
@@ -951,12 +1258,9 @@ export default function HomePage() {
                       className={rowClass(contact)}
                       aria-selected={selected?.id === contact.id}
                     >
-                      <td className="serial">
-                        {contact.list_number ?? (page - 1) * PAGE_SIZE + index + 1}
-                      </td>
                       <td>{contact.full_name || "—"}</td>
                       <td className="overflow-td">{contact.primary_email}</td>
-                      <td>{contact.company_name || "—"}</td>
+                      <td className="overflow-td">{contact.company_name || "—"}</td>
                       <td>{formatDate(contact.last_contacted_at)}</td>
                       <td>
                         {contact.email_count} / {contact.thread_count}
@@ -969,20 +1273,24 @@ export default function HomePage() {
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="review-actions">
                           <span className={reviewClass(contact.review_status)}>{contact.review_status}</span>
-                          <button
-                            className="review-btn approve"
-                            title="Approve — email later"
-                            onClick={() => setReviewStatus(contact, "approved")}
-                          >
-                            ✓
-                          </button>
-                          <button
-                            className="review-btn deny"
-                            title="Deny — not interested"
-                            onClick={() => setReviewStatus(contact, "denied")}
-                          >
-                            ✕
-                          </button>
+                          {!COMPASS_LIVE ? (
+                            <>
+                              <button
+                                className="review-btn approve"
+                                title="Approve — email later"
+                                onClick={() => setReviewStatus(contact, "approved")}
+                              >
+                                ✓
+                              </button>
+                              <button
+                                className="review-btn deny"
+                                title="Deny — not interested"
+                                onClick={() => setReviewStatus(contact, "denied")}
+                              >
+                                ✕
+                              </button>
+                            </>
+                          ) : null}
                         </div>
                       </td>
                       <td>
@@ -1016,7 +1324,7 @@ export default function HomePage() {
             </table>
           </div>
 
-          {auth?.connected && (
+          {mailboxConnected && (
             <div className="pagination">
               <span>
                 {contacts.length === 0
@@ -1110,16 +1418,24 @@ export default function HomePage() {
                 <span className={reviewClass(selected.review_status)}>{selected.review_status}</span>
               </div>
               <div className="review-actions drawer-review">
-                <button className="review-btn approve" onClick={() => setReviewStatus(selected, "approved")}>
-                  Approve to email
-                </button>
-                <button className="review-btn deny" onClick={() => setReviewStatus(selected, "denied")}>
-                  Deny
-                </button>
-                {selected.review_status !== "pending" && (
-                  <button className="review-btn reset" onClick={() => setReviewStatus(selected, "pending")}>
-                    Reset
-                  </button>
+                {COMPASS_LIVE ? (
+                  <p className="drawer-relationship-loading">
+                    Approve/deny moved to <a href="/compass">Compass</a> (per-campaign).
+                  </p>
+                ) : (
+                  <>
+                    <button className="review-btn approve" onClick={() => setReviewStatus(selected, "approved")}>
+                      Approve to email
+                    </button>
+                    <button className="review-btn deny" onClick={() => setReviewStatus(selected, "denied")}>
+                      Deny
+                    </button>
+                    {selected.review_status !== "pending" && (
+                      <button className="review-btn reset" onClick={() => setReviewStatus(selected, "pending")}>
+                        Reset
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1260,40 +1576,8 @@ export default function HomePage() {
           </>
         )}
       </div>
-
-      {pageBusy && (
-        <div className="page-busy-overlay" role="alertdialog" aria-modal="true" aria-labelledby="page-busy-title">
-          <div className="page-busy-card">
-            <div className="page-busy-spinner" aria-hidden="true" />
-            <h2 id="page-busy-title">{busyTitle}</h2>
-            <p>{busyDetail}</p>
-            <div
-              className={`page-busy-progress${busyProgressPct == null ? " page-busy-progress-indeterminate" : ""}`}
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={busyProgressPct ?? undefined}
-              aria-label={busyTitle}
-            >
-              <div
-                className="page-busy-progress-bar"
-                style={busyProgressPct != null ? { width: `${busyProgressPct}%` } : undefined}
-              />
-            </div>
-            {sync?.status === "running" && (
-              <button
-                type="button"
-                className="button"
-                onClick={handleClearStuckSync}
-                disabled={syncing}
-                title="Use if sync froze after an app restart"
-              >
-                Clear stuck sync
-              </button>
-            )}
-          </div>
         </div>
-      )}
+      </div>
     </main>
   );
 }

@@ -1,23 +1,27 @@
 "use client";
 
-import { CANDIDATES, type FactDecision, type ResearchFixture } from "@/lib/compass/northwynScenario";
+import type { FactDecision, ResearchItemView } from "@/lib/compass/types";
 
 type Props = {
-  research: ResearchFixture;
+  research: ResearchItemView;
   decision: FactDecision;
   onDecision: (d: FactDecision) => void;
   onDigDeeper?: () => void;
+  personName: string;
 };
 
-export function ResearchCard({ research, decision, onDecision, onDigDeeper }: Props) {
-  const person = CANDIDATES.find((c) => c.id === research.personId);
-  if (!person) return null;
-
+export function ResearchCard({
+  research,
+  decision,
+  onDecision,
+  onDigDeeper,
+  personName,
+}: Props) {
   return (
     <article className={`compass-research-card${decision ? ` is-${decision}` : ""}`}>
       <header>
         <h3>
-          {person.name} — external context{" "}
+          {personName} — external context{" "}
           <span className={research.identityConfirmed ? "compass-ok" : "compass-warn"}>
             Identity {research.identityConfirmed ? "✓ Confirmed" : "○ Unconfirmed"}
           </span>
@@ -40,6 +44,10 @@ export function ResearchCard({ research, decision, onDecision, onDigDeeper }: Pr
       ) : (
         <p className="compass-muted">No public facts attributed.</p>
       )}
+
+      {research.specialMessage ? (
+        <p className="compass-warn">{research.specialMessage}</p>
+      ) : null}
 
       <p>
         <span className="compass-plan-key">Recommended use</span> {research.recommendedUse}

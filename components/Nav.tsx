@@ -3,14 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const PROTOTYPE_ENABLED =
-  process.env.NEXT_PUBLIC_COMPASS_PROTOTYPE === "true" ||
-  process.env.NEXT_PUBLIC_COMPASS_PROTOTYPE === "1";
+const LIVE_ENABLED =
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "true" ||
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "1";
+
+const ACCOUNTS_UI =
+  process.env.NEXT_PUBLIC_ACCOUNTS_UI === "true" ||
+  process.env.NEXT_PUBLIC_ACCOUNTS_UI === "1";
 
 const LINKS = [
-  ...(PROTOTYPE_ENABLED ? [{ href: "/compass", label: "Compass" }] : []),
+  ...(LIVE_ENABLED ? [{ href: "/compass", label: "Compass" }] : []),
   { href: "/", label: "Contacts" },
   { href: "/outreach", label: "Outreach" },
+  ...(ACCOUNTS_UI ? [{ href: "/settings", label: "Settings" }] : []),
 ];
 
 export function Nav() {

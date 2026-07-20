@@ -1,10 +1,12 @@
 "use client";
 
-import {
-  CANDIDATES,
-  DRAFTS,
-  type DraftStatus,
-} from "@/lib/compass/northwynScenario";
+import type { DraftStatus } from "@/lib/compass/types";
+
+type PersonalizationChip = {
+  kind: "private" | "public";
+  label: string;
+  href?: string;
+};
 
 type Props = {
   personId: string;
@@ -18,10 +20,21 @@ type Props = {
   onTone: (mode: "shorter" | "warmer" | "direct") => void;
   onApplyAll: (mode: "shorter" | "warmer" | "direct") => void;
   onStub?: (label: string) => void;
+  onRegenerate?: () => void;
+  onChangeAsk?: () => void;
+  onRemovePublicRefs?: () => void;
+  onCallScript?: () => void;
+  onLinkedIn?: () => void;
+  personName: string;
+  roleLabel?: string;
+  subject: string;
+  ask?: string;
+  email?: string;
+  personalization?: PersonalizationChip[];
+  warnings?: string[];
 };
 
 export function DraftCard({
-  personId,
   body,
   status,
   editing,
@@ -32,20 +45,33 @@ export function DraftCard({
   onTone,
   onApplyAll,
   onStub,
+  onRegenerate,
+  onChangeAsk,
+  onRemovePublicRefs,
+  onCallScript,
+  onLinkedIn,
+  personName,
+  roleLabel,
+  subject,
+  ask,
+  email,
+  personalization,
+  warnings,
 }: Props) {
-  const person = CANDIDATES.find((c) => c.id === personId);
-  const draft = DRAFTS.find((d) => d.personId === personId);
-  if (!person || !draft) return null;
+  const role = roleLabel || "";
+  const askText = ask ?? "";
+  const chips = personalization ?? [];
 
   return (
     <article className={`compass-draft-card${status !== "pending" ? " is-approved" : ""}`}>
       <header>
         <p>
-          To: <strong>{person.name}</strong> · {person.likelyRole} · from &lt;
-          {sendingAccount}&gt;
+          To: <strong>{personName}</strong>
+          {email ? <> &lt;{email}&gt;</> : null}
+          {role ? <> · {role}</> : null} · from &lt;{sendingAccount}&gt;
         </p>
         <p>
-          Subject: <strong>{draft.subject}</strong>
+          Subject: <strong>{subject}</strong>
           {status !== "pending" ? (
             <span className="compass-ok"> · {status === "edited" ? "Edited" : "Approved"}</span>
           ) : null}
@@ -63,24 +89,32 @@ export function DraftCard({
         <pre className="compass-draft-body">{body}</pre>
       )}
 
+      {warnings && warnings.length > 0 ? (
+        <p className="compass-warn">{warnings.join(" · ")}</p>
+      ) : null}
+
       <div className="compass-draft-meta">
         <div>
           <span className="compass-plan-key">Personalization</span>{" "}
-          {draft.personalization.map((p, i) => (
-            <span key={i} className="compass-prov">
-              {p.kind === "private" ? "🔒" : "🌐"} {p.label}
-              {p.href ? (
-                <a href={p.href} target="_blank" rel="noreferrer">
-                  {" "}
-                  ↗
-                </a>
-              ) : null}
-              {i < draft.personalization.length - 1 ? " · " : ""}
-            </span>
-          ))}
+          {chips.length === 0 ? (
+            <span className="compass-muted">Relationship history</span>
+          ) : (
+            chips.map((p, i) => (
+              <span key={i} className="compass-prov">
+                {p.kind === "private" ? "🔒" : "🌐"} {p.label}
+                {p.href ? (
+                  <a href={p.href} target="_blank" rel="noreferrer">
+                    {" "}
+                    ↗
+                  </a>
+                ) : null}
+                {i < chips.length - 1 ? " · " : ""}
+              </span>
+            ))
+          )}
         </div>
         <div>
-          <span className="compass-plan-key">Ask</span> {draft.ask}
+          <span className="compass-plan-key">Ask</span> {askText}
         </div>
       </div>
 
@@ -94,7 +128,7 @@ export function DraftCard({
         <button
           type="button"
           className="button small secondary"
-          onClick={() => onStub?.("Regenerate")}
+          onClick={() => (onRegenerate ? onRegenerate() : onStub?.("Regenerate"))}
         >
           Regenerate
         </button>
@@ -110,28 +144,30 @@ export function DraftCard({
         <button
           type="button"
           className="button small secondary"
-          onClick={() => onStub?.("Change ask")}
+          onClick={() => (onChangeAsk ? onChangeAsk() : onStub?.("Change ask"))}
         >
           Change ask
         </button>
         <button
           type="button"
           className="button small secondary"
-          onClick={() => onStub?.("Remove public refs")}
+          onClick={() =>
+            onRemovePublicRefs ? onRemovePublicRefs() : onStub?.("Remove public refs")
+          }
         >
           Remove public refs
         </button>
         <button
           type="button"
           className="button small secondary"
-          onClick={() => onStub?.("Call script")}
+          onClick={() => (onCallScript ? onCallScript() : onStub?.("Call script"))}
         >
           → Call script
         </button>
         <button
           type="button"
           className="button small secondary"
-          onClick={() => onStub?.("LinkedIn")}
+          onClick={() => (onLinkedIn ? onLinkedIn() : onStub?.("LinkedIn"))}
         >
           → LinkedIn
         </button>

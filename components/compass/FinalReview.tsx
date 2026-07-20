@@ -1,6 +1,6 @@
 "use client";
 
-import { CANDIDATES } from "@/lib/compass/northwynScenario";
+import type { CampaignCandidateView } from "@/lib/compass/types";
 
 type Props = {
   roleSummary: string;
@@ -16,7 +16,9 @@ type Props = {
   onAuthorizeSend: () => void;
   onCancelSend: () => void;
   onCancelCampaign: () => void;
-  onResolvePriya: (action: "linkedin" | "drop") => void;
+  onDropMissingEmail: () => void;
+  candidates: CampaignCandidateView[];
+  sendPreviewNames?: string[];
 };
 
 export function FinalReview({
@@ -33,97 +35,84 @@ export function FinalReview({
   onAuthorizeSend,
   onCancelSend,
   onCancelCampaign,
-  onResolvePriya,
+  onDropMissingEmail,
+  candidates,
+  sendPreviewNames,
 }: Props) {
-  const included = CANDIDATES.filter((c) => approvedIds.includes(c.id));
-  const priya = included.find((c) => c.missingEmail);
+  const included = candidates.filter((c) => approvedIds.includes(c.id));
+  const missingEmail = included.find((c) => c.missingEmail);
   const recent = included.filter((c) => c.recentContact);
   const callBetter = included.filter((c) => c.callBetter);
-  const sendNames = included
-    .filter((c) => c.email && !c.missingEmail)
-    .map((c) => c.name);
+  const sendNames =
+    sendPreviewNames && sendPreviewNames.length > 0
+      ? sendPreviewNames
+      : included.filter((c) => c.email && !c.missingEmail).map((c) => c.name);
 
   return (
     <div className="compass-work-block">
-      <h2 className="compass-work-title">Northwyn fundraising — final review</h2>
+      <h2 className="compass-work-title">Final review</h2>
       <p>{roleSummary}</p>
       <p className="compass-muted">
         Searched: {searched} · Sending: &lt;{sendingAccount}&gt;
         <br />
-        Research: Standard · External facts used: {usedFacts} (all approved)
+        External facts used: {usedFacts} (approved)
       </p>
 
       <div className="compass-attention">
         <h3>⚠ Needs attention</h3>
         <ul>
-          {priya ? (
+          {missingEmail ? (
             <li>
-              1 missing email address ({priya.name.split(" ")[0]} S.) — resolve or drop{" "}
-              <button
-                type="button"
-                className="compass-text-link"
-                onClick={() => onResolvePriya("linkedin")}
-              >
-                Use LinkedIn
-              </button>{" "}
-              ·{" "}
-              <button
-                type="button"
-                className="compass-text-link"
-                onClick={() => onResolvePriya("drop")}
-              >
+              Missing email ({missingEmail.name}) —{" "}
+              <button type="button" className="compass-text-link" onClick={onDropMissingEmail}>
                 Drop
               </button>
             </li>
           ) : null}
           {recent.length > 0 ? (
-            <li>
-              {recent.length} contact{recent.length > 1 ? "s" : ""} messaged within 30 days (
-              {recent.map((c) => c.name.split(" ")[0]).join(", ")}) — include anyway?
-            </li>
+            <li>Recently contacted: {recent.map((c) => c.name).join(", ")}</li>
           ) : null}
           {callBetter.length > 0 ? (
-            <li>
-              {callBetter.length} flagged better for a personal call (
-              {callBetter.map((c) => c.name.split(" ")[0]).join(", ")})
-            </li>
+            <li>Call may land better: {callBetter.map((c) => c.name).join(", ")}</li>
+          ) : null}
+          {!missingEmail && recent.length === 0 && callBetter.length === 0 ? (
+            <li className="compass-muted">None</li>
           ) : null}
         </ul>
+      </div>
+
+      <div className="compass-work-actions sticky-actions">
+        <button type="button" className="button" onClick={onSave}>
+          Save drafts to mailbox
+        </button>
+        <button type="button" className="button" onClick={onSchedule}>
+          Schedule
+        </button>
+        <button type="button" className="button primary" onClick={onSend}>
+          Authorize send ({sendableCount})
+        </button>
+        <button type="button" className="button secondary" onClick={onCancelCampaign}>
+          Cancel campaign
+        </button>
       </div>
 
       {sendConfirmOpen ? (
         <div className="compass-send-confirm">
           <p>
-            Sending <strong>{sendableCount}</strong> messages now from &lt;{sendingAccount}&gt; to:{" "}
-            {sendNames.join(", ")}.
+            Sending {sendableCount} message(s) from &lt;{sendingAccount}&gt; to:{" "}
+            <strong>{sendNames.join(", ") || "(none)"}</strong>. Click <strong>Send</strong> to
+            authorize — this is the step that actually emails people.
           </p>
-          <p>Type or click <strong>Send</strong> to authorize — this is the step that actually emails people.</p>
           <div className="compass-work-actions">
-            <button type="button" className="button primary danger-ish" onClick={onAuthorizeSend}>
+            <button type="button" className="button primary" onClick={onAuthorizeSend}>
               Send
             </button>
-            <button type="button" className="button secondary" onClick={onCancelSend}>
+            <button type="button" className="button" onClick={onCancelSend}>
               Cancel
             </button>
           </div>
         </div>
-      ) : (
-        <div className="compass-work-actions">
-          <button type="button" className="button primary" onClick={onSave}>
-            Save {included.filter((c) => c.email).length} drafts to Outlook
-          </button>
-          <button type="button" className="button" onClick={onSchedule}>
-            Schedule…
-          </button>
-          <button type="button" className="button" onClick={onSend}>
-            Send…
-          </button>
-          <button type="button" className="button secondary" onClick={onCancelCampaign}>
-            Cancel campaign
-          </button>
-        </div>
-      )}
-      <p className="compass-muted">Send always asks again with the recipient list.</p>
+      ) : null}
     </div>
   );
 }

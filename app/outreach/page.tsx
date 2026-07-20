@@ -24,6 +24,10 @@ const USE_CASES = [
   { value: "strategic_introductions", label: "Strategic introductions" },
 ];
 
+const COMPASS_LIVE =
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "true" ||
+  process.env.NEXT_PUBLIC_COMPASS_LIVE === "1";
+
 function patternLabel(pattern: string | undefined) {
   switch (pattern) {
     case "two_way":
@@ -346,6 +350,15 @@ export default function OutreachPage() {
       </div>
 
       {error && <div className="banner error">{error}</div>}
+      {COMPASS_LIVE && (
+        <div className="banner info">
+          Draft generation and send are paused while Compass live campaigns are on. Use{" "}
+          <a href="/compass">
+            <strong>Compass</strong>
+          </a>{" "}
+          for objective-first outreach (drafting returns in Phase 7).
+        </div>
+      )}
       {sync?.status === "running" && (
         <div className="banner info">
           {sync.sync_type === "inbox" ? "Inbox" : "Sent"} sync: {sync.messages_fetched.toLocaleString()} fetched…
@@ -509,10 +522,10 @@ export default function OutreachPage() {
           </label>
 
           <div className="actions" style={{ flexWrap: "wrap" }}>
-            <button onClick={() => startBatch(false)} disabled={busy}>
+            <button onClick={() => startBatch(false)} disabled={busy || COMPASS_LIVE}>
               {analyzing ? "Analyzing…" : selected.size > 1 ? `Analyze & score ${selected.size}` : "Analyze & score"}
             </button>
-            <button className="primary" onClick={handleGenerate} disabled={busy}>
+            <button className="primary" onClick={handleGenerate} disabled={busy || COMPASS_LIVE}>
               {generating
                 ? "Generating…"
                 : selected.size > 1
@@ -642,11 +655,20 @@ export default function OutreachPage() {
               )}
 
               <div className="actions">
-                <button onClick={handleSaveDraft}>Save edits</button>
-                <button onClick={handleApproveDraft} disabled={activeDraft.status === "approved"}>
+                <button onClick={handleSaveDraft} disabled={COMPASS_LIVE}>
+                  Save edits
+                </button>
+                <button
+                  onClick={handleApproveDraft}
+                  disabled={COMPASS_LIVE || activeDraft.status === "approved"}
+                >
                   Approve draft
                 </button>
-                <button className="primary" onClick={handleSendDraft} disabled={sending}>
+                <button
+                  className="primary"
+                  onClick={handleSendDraft}
+                  disabled={COMPASS_LIVE || sending}
+                >
                   {sending ? "Sending…" : "Send via Outlook"}
                 </button>
               </div>

@@ -9,7 +9,9 @@ export type CompassStage =
   | "drafts"
   | "sendAcct"
   | "review"
-  | "done";
+  | "tracking"
+  | "done"
+  | "campaigns";
 
 export const WORKSPACE_STAGES: CompassStage[] = [
   "clarify",
@@ -21,7 +23,9 @@ export const WORKSPACE_STAGES: CompassStage[] = [
   "drafts",
   "sendAcct",
   "review",
+  "tracking",
   "done",
+  "campaigns",
 ];
 
 export function isWorkspaceStage(stage: CompassStage): boolean {
@@ -39,7 +43,9 @@ export const STAGE_LABELS: Record<CompassStage, string> = {
   drafts: "Drafts",
   sendAcct: "Sending account",
   review: "Final review",
+  tracking: "Tracking",
   done: "Done",
+  campaigns: "Campaigns",
 };
 
 export const NEXT_DECISION: Record<CompassStage, string> = {
@@ -53,5 +59,7 @@ export const NEXT_DECISION: Record<CompassStage, string> = {
   drafts: "Approve drafts (Gate 4)",
   sendAcct: "Confirm sending account (Gate 5)",
   review: "Save drafts or authorize send (Gates 6–8)",
-  done: "Campaign complete for this prototype",
+  tracking: "Review replies and Gate 9 follow-ups",
+  done: "Campaign complete",
+  campaigns: "Open a campaign or start a new objective",
 };

@@ -79,6 +79,27 @@ export type SyncRun = {
   error_message: string | null;
   started_at: string;
   completed_at: string | null;
+  account_id?: string | null;
+};
+
+export type MailboxAccount = {
+  id: string;
+  display_name: string;
+  email: string;
+  provider: string;
+  blurb: string;
+  status: string;
+  last_sync_at: string | null;
+  last_sync_plain: string | null;
+  permissions: Record<string, boolean>;
+  is_functional: boolean;
+  default_included: boolean;
+  enabled: boolean;
+  is_stub: boolean;
+  connected: boolean;
+  plain_message: string | null;
+  can_send: boolean;
+  partial_permissions: boolean;
 };
 
 export type EmailDraft = {
@@ -269,8 +290,13 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   authStatus: () => apiFetch<AuthStatus>("/auth/status"),
   disconnect: () => apiFetch<{ connected: boolean }>("/auth/disconnect", { method: "POST" }),
-  stats: (includeGraphTotal = false) =>
-    apiFetch<Stats>(`/contacts/stats${includeGraphTotal ? "?include_graph_total=true" : ""}`),
+  stats: (includeGraphTotal = false, accountId?: string | null) => {
+    const qs = new URLSearchParams();
+    if (includeGraphTotal) qs.set("include_graph_total", "true");
+    if (accountId) qs.set("account_id", accountId);
+    const q = qs.toString();
+    return apiFetch<Stats>(`/contacts/stats${q ? `?${q}` : ""}`);
+  },
   outlookContacts: (params: {
     page_size?: number;
     next_link?: string;
@@ -337,6 +363,23 @@ export const api = {
   failRunningSyncs: () => apiFetch<SyncRun[]>("/sync/fail-running", { method: "POST" }),
   syncStatus: () => apiFetch<SyncRun | null>("/sync/status"),
   loginUrl: () => `${API_BASE}/auth/login`,
+  listAccounts: () => apiFetch<MailboxAccount[]>("/accounts"),
+  getAccount: (id: string) => apiFetch<MailboxAccount>(`/accounts/${id}`),
+  accountLogin: (id: string) =>
+    apiFetch<{ stub?: boolean; login_url?: string; connect_url?: string; error?: string }>(
+      `/accounts/${id}/login`,
+    ),
+  stubConnectAccount: (id: string) =>
+    apiFetch<MailboxAccount>(`/accounts/${id}/stub-connect`, { method: "POST" }),
+  disconnectAccount: (id: string) =>
+    apiFetch<{ connected: boolean; account_id: string; consequences: string }>(
+      `/accounts/${id}/disconnect`,
+      { method: "POST" },
+    ),
+  syncAccount: (id: string, syncType = "full") =>
+    apiFetch<SyncRun>(`/accounts/${id}/sync?sync_type=${syncType}`, { method: "POST" }),
+  accountSyncStatus: (id: string) => apiFetch<SyncRun | null>(`/accounts/${id}/sync/status`),
+  accountStatus: (id: string) => apiFetch<MailboxAccount>(`/accounts/${id}/status`),
   getOutreachPrompt: () => apiFetch<OutreachPrompt>("/outreach/prompt"),
   saveOutreachPrompt: (data: { system_prompt?: string; user_prompt_template?: string }) =>
     apiFetch<OutreachPrompt>("/outreach/prompt", { method: "PATCH", body: JSON.stringify(data) }),
@@ -443,6 +486,348 @@ export const api = {
     ),
   aiSummarizeThreads: (id: string, force = false) =>
     apiFetch<AIResult>(`/contacts/${id}/ai/summarize-threads?force=${force}`, { method: "POST" }),
+
+  // Compass P3–P5 campaigns
+  listCampaigns: () => apiFetch<CampaignOut[]>("/campaigns"),
+  createCampaign: (objective: string, accountIds: string[]) =>
+    apiFetch<CampaignOut>("/campaigns", {
+      method: "POST",
+      body: JSON.stringify({ objective, account_ids: accountIds }),
+    }),
+  getCampaign: (id: string) => apiFetch<CampaignOut>(`/campaigns/${id}`),
+  clarifyCampaign: (id: string, data: { answer?: string; use_defaults?: boolean }) =>
+    apiFetch<CampaignOut>(`/campaigns/${id}/clarify`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  revisePlan: (id: string, instruction: string) =>
+    apiFetch<CampaignOut>(`/campaigns/${id}/plan/revise`, {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    }),
+  approvePlan: (id: string) =>
+    apiFetch<CampaignOut>(`/campaigns/${id}/plan/approve`, { method: "POST" }),
+  startCampaignResearch: (id: string) =>
+    apiFetch<{ status: string; progress?: string; campaign: CampaignOut }>(
+      `/campaigns/${id}/research/start`,
+      { method: "POST" },
+    ),
+  campaignResearchStatus: (id: string) =>
+    apiFetch<{ status: string; progress?: string; error?: string; campaign: CampaignOut }>(
+      `/campaigns/${id}/research/status`,
+    ),
+  listCampaignCandidates: (id: string) =>
+    apiFetch<CampaignCandidateOut[]>(`/campaigns/${id}/candidates`),
+  setCampaignDecisions: (
+    id: string,
+    items: { candidate_id: string; decision: string }[],
+    instructionText?: string,
+  ) =>
+    apiFetch<{ updated: number; campaign: CampaignOut }>(`/campaigns/${id}/decisions`, {
+      method: "POST",
+      body: JSON.stringify({ items, instruction_text: instructionText || null }),
+    }),
+  previewNlOp: (id: string, instruction: string) =>
+    apiFetch<{
+      instruction: string;
+      restatement: string;
+      candidate_ids: string[];
+      action: string;
+      matched_count: number;
+    }>(`/campaigns/${id}/nl-ops/preview`, {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    }),
+  applyNlOp: (id: string, instruction: string) =>
+    apiFetch<{ updated: number; restatement: string; campaign: CampaignOut }>(
+      `/campaigns/${id}/nl-ops/apply`,
+      { method: "POST", body: JSON.stringify({ instruction }) },
+    ),
+  campaignAudit: (id: string) =>
+    apiFetch<
+      Array<{
+        id: string;
+        event_type: string;
+        narrative: string | null;
+        payload: Record<string, unknown> | null;
+        created_at: string | null;
+      }>
+    >(`/campaigns/${id}/audit`),
+
+  confirmCampaign: (
+    id: string,
+    data: { notes?: string; ask?: string; research_mode?: string },
+  ) =>
+    apiFetch<CampaignOut>(`/campaigns/${id}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  startExternalResearch: (id: string) =>
+    apiFetch<{ status: string; progress?: string; campaign: CampaignOut }>(
+      `/campaigns/${id}/external-research/start`,
+      { method: "POST" },
+    ),
+  externalResearchStatus: (id: string) =>
+    apiFetch<{ status: string; progress?: string; campaign: CampaignOut }>(
+      `/campaigns/${id}/external-research/status`,
+    ),
+  listCampaignFacts: (id: string) => apiFetch<CampaignFactOut[]>(`/campaigns/${id}/facts`),
+  setFactDecisions: (
+    id: string,
+    items: { fact_id: string; decision: string }[],
+  ) =>
+    apiFetch<{ updated: number; campaign: CampaignOut }>(`/campaigns/${id}/facts/decisions`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+  generateCampaignDrafts: (id: string) =>
+    apiFetch<{ items: CampaignDraftOut[] }>(`/campaigns/${id}/drafts/generate`, {
+      method: "POST",
+    }),
+  listCampaignDrafts: (id: string) =>
+    apiFetch<CampaignDraftOut[]>(`/campaigns/${id}/drafts`),
+  patchCampaignDraft: (id: string, draftId: string, data: { subject?: string; body?: string }) =>
+    apiFetch<CampaignDraftOut>(`/campaigns/${id}/drafts/${draftId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  approveCampaignDraft: (id: string, draftId: string) =>
+    apiFetch<CampaignDraftOut>(`/campaigns/${id}/drafts/${draftId}/approve`, {
+      method: "POST",
+    }),
+  applyCampaignTone: (
+    id: string,
+    data: { mode: string; scope?: string; draft_id?: string },
+  ) =>
+    apiFetch<{ items: CampaignDraftOut[] }>(`/campaigns/${id}/drafts/apply-tone`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  setSendingAccount: (
+    id: string,
+    data: { account_id: string; careers_justification?: string },
+  ) =>
+    apiFetch<CampaignOut>(`/campaigns/${id}/sending-account`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  saveDraftsToMailbox: (id: string) =>
+    apiFetch<{ results: Array<Record<string, unknown>> }>(
+      `/campaigns/${id}/drafts/save-to-mailbox`,
+      { method: "POST" },
+    ),
+  scheduleCampaign: (id: string, scheduledFor: string) =>
+    apiFetch<{ items: Array<Record<string, unknown>> }>(`/campaigns/${id}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ scheduled_for: scheduledFor }),
+    }),
+  sendPreview: (id: string) =>
+    apiFetch<{
+      account_id: string;
+      recipients: Array<{ draft_id: string; email: string; name?: string; subject?: string }>;
+      recipient_emails: string[];
+      count: number;
+    }>(`/campaigns/${id}/send/preview`, { method: "POST" }),
+  authorizeCampaignSend: (id: string, recipientEmails: string[]) =>
+    apiFetch<{ results: Array<Record<string, unknown>> }>(`/campaigns/${id}/send`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true, recipient_emails: recipientEmails }),
+    }),
+  campaignSendLog: (id: string) =>
+    apiFetch<Array<Record<string, unknown>>>(`/campaigns/${id}/send-log`),
+
+  regenerateCampaignDraft: (id: string, draftId: string, variant?: string) =>
+    apiFetch<CampaignDraftOut>(`/campaigns/${id}/drafts/${draftId}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify(variant ? { variant } : {}),
+    }),
+  setCampaignDraftVariant: (id: string, draftId: string, variant: string) =>
+    apiFetch<CampaignDraftOut>(`/campaigns/${id}/drafts/${draftId}/variant`, {
+      method: "POST",
+      body: JSON.stringify({ variant }),
+    }),
+  changeCampaignDraftAsk: (id: string, draftId: string, ask: string) =>
+    apiFetch<CampaignDraftOut>(`/campaigns/${id}/drafts/${draftId}/change-ask`, {
+      method: "POST",
+      body: JSON.stringify({ ask }),
+    }),
+  removeCampaignDraftPublicRefs: (id: string, draftId: string) =>
+    apiFetch<CampaignDraftOut>(`/campaigns/${id}/drafts/${draftId}/remove-public-refs`, {
+      method: "POST",
+    }),
+
+  listCampaignsSummary: () =>
+    apiFetch<
+      Array<{
+        id: string;
+        title: string | null;
+        status: string;
+        objective_raw?: string;
+        sent?: number;
+        replied?: number;
+        updated_at?: string | null;
+      }>
+    >(`/campaigns?summary=true`),
+  getCampaignTracking: (id: string) =>
+    apiFetch<CampaignTrackingOut>(`/campaigns/${id}/tracking`),
+  refreshCampaignTracking: (id: string) =>
+    apiFetch<CampaignTrackingOut>(`/campaigns/${id}/tracking/refresh`, { method: "POST" }),
+
+  proposeFollowUps: (id: string) =>
+    apiFetch<{ items: FollowUpOut[] }>(`/campaigns/${id}/follow-ups/propose`, {
+      method: "POST",
+    }),
+  listFollowUps: (id: string) => apiFetch<FollowUpOut[]>(`/campaigns/${id}/follow-ups`),
+  approveFollowUp: (id: string, followupId: string) =>
+    apiFetch<FollowUpOut>(`/campaigns/${id}/follow-ups/${followupId}/approve`, {
+      method: "POST",
+    }),
+  rejectFollowUp: (id: string, followupId: string) =>
+    apiFetch<FollowUpOut>(`/campaigns/${id}/follow-ups/${followupId}/reject`, {
+      method: "POST",
+    }),
+  sendFollowUp: (id: string, followupId: string, recipientEmail: string) =>
+    apiFetch<{ status: string; followup_id: string; email: string }>(
+      `/campaigns/${id}/follow-ups/${followupId}/send`,
+      {
+        method: "POST",
+        body: JSON.stringify({ confirm: true, recipient_email: recipientEmail }),
+      },
+    ),
+};
+
+export type CampaignTrackingOut = {
+  campaign_id: string;
+  title: string | null;
+  status: string;
+  sending_account_id: string | null;
+  counts: Record<string, number>;
+  contacts: Array<{
+    candidate_id: string;
+    name: string | null;
+    email: string | null;
+    tracking_status: string;
+    company?: string | null;
+  }>;
+  replies: Array<{
+    id: string;
+    candidate_id: string;
+    excerpt: string | null;
+    matched_by: string | null;
+    matched_at: string | null;
+  }>;
+  commitments: Array<{
+    id: string;
+    candidate_id: string;
+    owner: string;
+    text: string;
+    due_hint: string | null;
+    status: string;
+  }>;
+  suggestions: string[];
+};
+
+export type FollowUpOut = {
+  id: string;
+  campaign_id: string;
+  candidate_id: string;
+  kind: string;
+  subject: string | null;
+  body: string;
+  status: string;
+  based_on_status: string | null;
+};
+
+export type CampaignOut = {
+  id: string;
+  title: string | null;
+  objective_raw: string;
+  objective_parsed: Record<string, unknown> | null;
+  status: string;
+  account_ids: string[];
+  clarification_round: number;
+  research_status: string | null;
+  research_progress: string | null;
+  research_error: string | null;
+  research_mode?: string | null;
+  message_strategy?: Record<string, unknown>;
+  external_research_status?: string | null;
+  external_research_progress?: string | null;
+  sending_account_id?: string | null;
+  sending_account_confirmed_at?: string | null;
+  plan: {
+    id: string;
+    version: number;
+    plan: Record<string, unknown>;
+    assumptions: string[] | null;
+    revision_note: string | null;
+    approved_at: string | null;
+    approved_by: string | null;
+  } | null;
+  plan_approved: boolean;
+  candidates_count: number;
+  included_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type CampaignCandidateOut = {
+  id: string;
+  contact_id: string | null;
+  rank: number;
+  full_name: string | null;
+  email: string | null;
+  company: string | null;
+  role_label: string | null;
+  strength_label: string | null;
+  relevance_label: string | null;
+  why_text: string | null;
+  source_accounts: string[];
+  decision: string;
+  flags: string[];
+  evidence: Array<{
+    id: string;
+    kind: string;
+    occurred_at: string | null;
+    source_account: string | null;
+    direction: string | null;
+    subject: string | null;
+    summary: string | null;
+    message_id: string | null;
+    outlook_weblink: string | null;
+    citation_ok: boolean;
+  }>;
+};
+
+export type CampaignFactOut = {
+  id: string;
+  candidate_id: string;
+  claim: string;
+  sources: Array<Record<string, unknown>>;
+  publication_date: string | null;
+  event_date: string | null;
+  retrieved_at: string | null;
+  confidence: string | null;
+  status: string;
+  identity_confirmed: boolean;
+  quarantined_reason: string | null;
+  recommended_use: string | null;
+};
+
+export type CampaignDraftOut = {
+  id: string;
+  campaign_id: string;
+  candidate_id: string;
+  subject: string | null;
+  body: string;
+  status: string;
+  lifecycle: string;
+  provenance: Record<string, unknown>;
+  ask: string | null;
+  warnings: string[];
+  variant: string;
+  mailbox_draft_id: string | null;
+  mailbox_draft_web_link: string | null;
 };
 
 export function formatDate(value: string | null) {

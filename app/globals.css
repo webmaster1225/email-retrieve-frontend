@@ -818,6 +818,271 @@ tr.row-denied:hover td {
 }
 
 /* ============================================================
+   Contacts — mailbox sidebar
+   ============================================================ */
+.contacts-shell {
+  display: block;
+}
+
+.contacts-shell.has-mailbox-sidebar {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.contacts-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mailbox-sidebar {
+  position: sticky;
+  top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 12px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.mailbox-sidebar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.mailbox-sidebar-head h2 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mailbox-sidebar-link {
+  font-size: 0.8rem;
+  font-weight: 550;
+}
+
+.mailbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mailbox-empty {
+  padding: 12px 8px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.mailbox-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #ededed;
+  background: transparent;
+  border-radius: var(--radius);
+  padding: 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  color: inherit;
+  font: inherit;
+}
+
+.mailbox-item-select {
+  flex: 1;
+  text-align: left;
+  align-items: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: inherit;
+  font: inherit;
+  box-shadow: none;
+}
+
+.mailbox-item-select:hover {
+  box-shadow: none;
+}
+
+.mailbox-item-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.mailbox-sync-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.mailbox-sync-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--primary);
+  border-color: var(--border-strong);
+}
+
+.mailbox-sync-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.mailbox-sync-btn.is-spinning svg {
+  animation: mailbox-sync-spin 0.85s linear infinite;
+}
+
+@keyframes mailbox-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mailbox-item:hover:has(.mailbox-item-select:not(:disabled)) {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.mailbox-item.is-selected {
+  background: var(--primary-soft);
+  border-color: #c7d2fe;
+}
+
+.mailbox-item.is-disconnected {
+  opacity: 1;
+}
+
+.mailbox-item.is-disconnected .mailbox-item-select {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.mailbox-item-select:disabled {
+  cursor: not-allowed;
+}
+
+.mailbox-connect-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8rem;
+}
+
+.mailbox-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.mailbox-item-name {
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.mailbox-item-badge {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+}
+
+.mailbox-item-badge.is-connected {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.mailbox-item-badge.is-offline {
+  background: var(--surface-3);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.mailbox-item-email {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.mailbox-item-metrics {
+  display: flex;
+  flex-direction: row;
+  gap: 1px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: var(--text-secondary);
+}
+
+.mailbox-item-status {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.mailbox-item-sync {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .contacts-shell.has-mailbox-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .mailbox-sidebar {
+    position: static;
+    max-height: none;
+  }
+
+  .mailbox-list {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+  }
+
+  .mailbox-list > li {
+    flex: 0 0 min(240px, 80vw);
+  }
+}
+
+/* ============================================================
    Drawer
    ============================================================ */
 .layout-with-drawer {
@@ -2465,6 +2730,19 @@ a.button[aria-disabled="true"] {
 .button.secondary {
   background: var(--surface-2);
   color: var(--text-secondary);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+
+.button.secondary:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.button.secondary:active:not(:disabled) {
+  background: var(--border);
+  border-color: var(--border-strong);
 }
 
 .compass-send-acct-options {
@@ -2525,4 +2803,145 @@ a.button[aria-disabled="true"] {
   margin: 0.25rem 0 0;
   font-size: 0.9rem;
   font-weight: 550;
+}
+
+/* Settings — multi-mailbox (P2) */
+.settings-accounts h2,
+.settings-later h2 {
+  margin-top: 0;
+}
+
+.settings-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.settings-account-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.15rem;
+  background: var(--surface-2);
+}
+
+.settings-account-card.is-functional {
+  border-color: var(--warning-border);
+}
+
+.settings-account-card h3 {
+  margin: 0 0 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.settings-email {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.settings-status-line {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.settings-stub-badge,
+.settings-functional-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.settings-stub-badge {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.settings-functional-badge {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border: 1px solid var(--warning-border);
+}
+
+.settings-perms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+
+.settings-perm {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  color: var(--text-subtle);
+  text-transform: capitalize;
+}
+
+.settings-perm.on {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.settings-warn {
+  color: var(--warning);
+  font-size: 0.88rem;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.settings-disabled-list {
+  color: var(--text-muted);
+  margin: 0.5rem 0 0;
+}
+
+.banner.success {
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  color: var(--success);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+}
+
+.banner.error {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+}
+
+.banner.settings-oauth-help {
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
+  color: var(--text-secondary);
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  margin: 0.75rem 0 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.banner.settings-oauth-help ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.banner.settings-oauth-help code {
+  font-size: 0.8rem;
 }

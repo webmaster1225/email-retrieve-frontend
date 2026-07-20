@@ -3,9 +3,10 @@
 type Props = {
   onStub?: (label: string) => void;
   showLegacyLink?: boolean;
+  onCampaigns?: () => void;
 };
 
-export function CompassNav({ onStub, showLegacyLink }: Props) {
+export function CompassNav({ onStub, showLegacyLink, onCampaigns }: Props) {
   return (
     <header className="compass-header">
       <div className="compass-header-brand">
@@ -16,18 +17,16 @@ export function CompassNav({ onStub, showLegacyLink }: Props) {
         <button
           type="button"
           className="compass-link-btn"
-          onClick={() => onStub?.("Campaigns")}
+          onClick={() => (onCampaigns ? onCampaigns() : onStub?.("Campaigns"))}
         >
           Campaigns
         </button>
-        <button
-          type="button"
-          className="compass-link-btn"
-          onClick={() => onStub?.("Settings")}
-          aria-label="Settings"
-        >
+        <a href="/" className="compass-link-btn">
+          Relationships
+        </a>
+        <a href="/settings" className="compass-link-btn" aria-label="Settings">
           ⚙
-        </button>
+        </a>
         {showLegacyLink ? (
           <a href="/" className="compass-link-btn compass-legacy">
             Legacy CRM

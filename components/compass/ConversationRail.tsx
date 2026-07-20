@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatMessage } from "@/lib/compass/northwynScenario";
+import type { ChatMessage } from "@/lib/compass/types";
 import { useEffect, useRef, useState } from "react";
 
 type Props = {

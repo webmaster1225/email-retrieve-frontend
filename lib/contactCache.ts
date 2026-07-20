@@ -1,12 +1,13 @@
 import { OutlookContact } from "@/lib/api";
 
-const CACHE_KEY = "crm-contacts-v2";
+const CACHE_KEY = "crm-contacts-v3";
 
 export type ContactCacheFilters = {
   q: string;
   fundraisingTier: string;
   emailCountMin: string;
   reviewFilter: string;
+  accountId: string | null;
 };
 
 export type ContactCache = {
@@ -23,7 +24,8 @@ function filtersMatch(a: ContactCacheFilters, b: ContactCacheFilters) {
     a.q === b.q &&
     a.fundraisingTier === b.fundraisingTier &&
     a.emailCountMin === b.emailCountMin &&
-    a.reviewFilter === b.reviewFilter
+    a.reviewFilter === b.reviewFilter &&
+    a.accountId === b.accountId
   );
 }
 

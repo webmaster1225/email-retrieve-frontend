@@ -1,9 +1,9 @@
 "use client";
 
-import type { CandidateFixture, ContactDecision } from "@/lib/compass/northwynScenario";
+import type { CampaignCandidateView, ContactDecision } from "@/lib/compass/types";
 
 type Props = {
-  candidate: CandidateFixture;
+  candidate: CampaignCandidateView;
   decision: ContactDecision;
   evidenceOpen: boolean;
   onDecision: (d: ContactDecision) => void;
