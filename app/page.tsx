@@ -1077,15 +1077,20 @@ export default function HomePage() {
                             <span className="mailbox-item-email">&lt;{account.email}&gt;</span>
                             {showSelectedStats ? (
                               <span className="mailbox-item-metrics">
-                                <span>
-                                  {showSelectedStats.external_contacts.toLocaleString()} contacts
-                                </span>{" / "}
-                                <span>
-                                  {showSelectedStats.synced_messages.toLocaleString()}
-                                  {showSelectedStats.graph_sent_total != null
-                                    ? ` / ${showSelectedStats.graph_sent_total.toLocaleString()}`
-                                    : ""}{" "}
-                                  messages
+                                <span className="mailbox-item-metrics-item">
+                                  <span>
+                                    {showSelectedStats.external_contacts.toLocaleString()}
+                                  </span>
+                                  <span>contacts</span>
+                                </span>
+                                <span className="mailbox-item-metrics-item">
+                                  <span>
+                                    {showSelectedStats.synced_messages.toLocaleString()}
+                                    {showSelectedStats.graph_sent_total != null
+                                      ? ` / ${showSelectedStats.graph_sent_total.toLocaleString()}`
+                                      : ""}{" "}
+                                  </span>
+                                  <span>messages</span>
                                 </span>
                               </span>
                             ) : null}

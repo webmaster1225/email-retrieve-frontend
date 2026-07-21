@@ -1051,11 +1051,17 @@ tr.row-denied:hover td {
 .mailbox-item-metrics {
   display: flex;
   flex-direction: row;
-  gap: 1px;
+  gap: 20px;
   margin-top: 4px;
   font-size: 0.72rem;
   font-weight: 550;
   color: var(--text-secondary);
+}
+
+.mailbox-item-metrics-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .mailbox-item-status {
