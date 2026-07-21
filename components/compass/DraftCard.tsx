@@ -17,8 +17,8 @@ type Props = {
   onApprove: () => void;
   onEditToggle: () => void;
   onBodyChange: (body: string) => void;
-  onTone: (mode: "shorter" | "warmer" | "direct") => void;
-  onApplyAll: (mode: "shorter" | "warmer" | "direct") => void;
+  onTone: (mode: "shorter" | "warmer" | "direct" | "formal") => void;
+  onApplyAll: (mode: "shorter" | "warmer" | "direct" | "formal") => void;
   onStub?: (label: string) => void;
   onRegenerate?: () => void;
   onChangeAsk?: () => void;
@@ -140,6 +140,9 @@ export function DraftCard({
         </button>
         <button type="button" className="button small" onClick={() => onTone("direct")}>
           More direct
+        </button>
+        <button type="button" className="button small" onClick={() => onTone("formal")}>
+          More formal
         </button>
         <button
           type="button"

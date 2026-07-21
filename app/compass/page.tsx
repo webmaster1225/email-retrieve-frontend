@@ -25,7 +25,7 @@ export default function CompassPage() {
         <div className="panel">
           <p>
             Set <code>NEXT_PUBLIC_COMPASS_LIVE=true</code> in <code>frontend/.env</code>, connect
-            mailboxes in Settings, and restart the Next.js dev server.
+            mailboxes on Contacts, and restart the Next.js dev server.
           </p>
           <p>
             <a href="/">Back to Contacts</a>

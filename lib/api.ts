@@ -378,6 +378,8 @@ export const api = {
     ),
   syncAccount: (id: string, syncType = "full") =>
     apiFetch<SyncRun>(`/accounts/${id}/sync?sync_type=${syncType}`, { method: "POST" }),
+  stopAccountSync: (id: string) =>
+    apiFetch<SyncRun | null>(`/accounts/${id}/sync/stop`, { method: "POST" }),
   accountSyncStatus: (id: string) => apiFetch<SyncRun | null>(`/accounts/${id}/sync/status`),
   accountStatus: (id: string) => apiFetch<MailboxAccount>(`/accounts/${id}/status`),
   getOutreachPrompt: () => apiFetch<OutreachPrompt>("/outreach/prompt"),
@@ -611,6 +613,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  campaignPreflight: (id: string) =>
+    apiFetch<{
+      recipient_count: number;
+      by_role: Record<string, number>;
+      searched_accounts: string[];
+      sending_account: string | null;
+      research_mode: string | null;
+      external_facts_approved: number;
+      attention: {
+        missing_email: Array<{ id: string; name: string }>;
+        recently_messaged: Array<{ id: string; name: string; email?: string }>;
+        call_better: Array<{ id: string; name: string }>;
+        needs_review: Array<{ id: string; name: string; draft_status?: string }>;
+        duplicates: Array<{ id: string; name: string; duplicate_of?: string }>;
+      };
+      ready_to_save: boolean;
+    }>(`/campaigns/${id}/preflight`),
   saveDraftsToMailbox: (id: string) =>
     apiFetch<{ results: Array<Record<string, unknown>> }>(
       `/campaigns/${id}/drafts/save-to-mailbox`,

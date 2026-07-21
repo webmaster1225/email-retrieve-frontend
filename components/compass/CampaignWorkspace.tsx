@@ -64,6 +64,7 @@ export function CampaignWorkspace({ compass }: Props) {
     advanceFromClarify,
     approvePlan,
     finishCards,
+    batchApproveHighConfidence,
     confirmCampaign,
     finishResearch,
     applyTone,
@@ -90,6 +91,7 @@ export function CampaignWorkspace({ compass }: Props) {
     removePublicRefs,
     researchMode,
     setResearchMode,
+    preflightAttention,
     strategyNotes,
     setStrategyNotes,
     sendingAccountOptions,
@@ -188,11 +190,14 @@ export function CampaignWorkspace({ compass }: Props) {
         </div>
         {cardCandidates.length === 0 ? (
           <p className="compass-muted">
-            No candidates with citable evidence yet. Sync a mailbox in Settings, then revise and
+            No candidates with citable evidence yet. Sync a mailbox on Contacts, then revise and
             re-approve the plan.
           </p>
         ) : null}
         <div className="compass-work-actions sticky-actions">
+          <button type="button" className="button secondary" onClick={batchApproveHighConfidence}>
+            Include all high-confidence
+          </button>
           <button type="button" className="button primary" onClick={finishCards}>
             Continue with {approvedIds.length} included
           </button>
@@ -223,7 +228,9 @@ export function CampaignWorkspace({ compass }: Props) {
             onChange={(e) => setResearchMode(e.target.value)}
           >
             <option value="relationship_only">Relationship-only (no web)</option>
-            <option value="light_standard">Light / standard (public scan)</option>
+            <option value="light">Light (one public fact max)</option>
+            <option value="standard">Standard (typical public scan)</option>
+            <option value="enhanced">Enhanced (deeper dig)</option>
           </select>
         </div>
         <div className="compass-work-actions">
@@ -322,8 +329,8 @@ export function CampaignWorkspace({ compass }: Props) {
         <h2 className="compass-work-title">Confirm sending account</h2>
         {sendOptions.length === 0 ? (
           <p className="compass-warn">
-            No connected sending mailboxes. Connect an account in{" "}
-            <a href="/settings">Settings</a> first.
+            No connected sending mailboxes. Connect an account on the{" "}
+            <a href="/">Contacts</a> page first.
           </p>
         ) : (
           <>
@@ -379,11 +386,13 @@ export function CampaignWorkspace({ compass }: Props) {
         searched={accountLabels || "selected mailboxes"}
         sendingAccount={sendingAccount || recommendedSend}
         usedFacts={usedFactCount}
+        researchMode={researchMode}
         approvedIds={approvedIds}
         sendableCount={sendableIds.length}
         sendConfirmOpen={sendConfirmOpen}
         candidates={cardCandidates}
         sendPreviewNames={sendPreviewNames}
+        preflightAttention={preflightAttention}
         onSave={saveDrafts}
         onSchedule={scheduleSend}
         onSend={openSendConfirm}

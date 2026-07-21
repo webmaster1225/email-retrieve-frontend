@@ -28,6 +28,39 @@ export const WORKSPACE_STAGES: CompassStage[] = [
   "campaigns",
 ];
 
+export function stageFromCampaignStatus(status: string | null | undefined): CompassStage {
+  switch (status) {
+    case "draft":
+    case "clarifying":
+      return "clarify";
+    case "planning":
+    case "plan_ready":
+      return "plan";
+    case "researching":
+      return "progress";
+    case "reviewing_contacts":
+      return "cards";
+    case "confirming":
+    case "awaiting_confirm":
+      return "confirm";
+    case "external_research":
+      return "research";
+    case "drafting":
+    case "reviewing_drafts":
+      return "drafts";
+    case "awaiting_sending_account":
+      return "sendAcct";
+    case "ready_to_save":
+    case "scheduled":
+      return "review";
+    case "tracking":
+    case "completed":
+      return "tracking";
+    default:
+      return "plan";
+  }
+}
+
 export function isWorkspaceStage(stage: CompassStage): boolean {
   return stage !== "home";
 }

@@ -24,9 +24,6 @@ export function CompassNav({ onStub, showLegacyLink, onCampaigns }: Props) {
         <a href="/" className="compass-link-btn">
           Relationships
         </a>
-        <a href="/settings" className="compass-link-btn" aria-label="Settings">
-          ⚙
-        </a>
         {showLegacyLink ? (
           <a href="/" className="compass-link-btn compass-legacy">
             Legacy CRM

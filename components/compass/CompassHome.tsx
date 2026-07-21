@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { OBJECTIVE_CHIPS, NORTHWYN_OBJECTIVE } from "@/lib/compass/northwynScenario";
+import { OBJECTIVE_CHIPS } from "@/lib/compass/northwynScenario";
 import type { AccountId, AccountView } from "@/lib/compass/types";
 import { mailboxToFixture } from "@/lib/compass/accountUtils";
 import { api, type MailboxAccount } from "@/lib/api";
@@ -77,7 +77,9 @@ export function CompassHome({
   }, []);
 
   const submit = () => {
-    onStart(objective.trim() || NORTHWYN_OBJECTIVE);
+    const text = objective.trim();
+    if (!text) return;
+    onStart(text);
   };
 
   const displayAccounts: (AccountView & {
@@ -127,9 +129,8 @@ export function CompassHome({
             type="button"
             className="compass-chip"
             onClick={() => {
-              const text = chip === "Fundraising help" ? NORTHWYN_OBJECTIVE : chip;
-              onObjectiveChange(text);
-              onStart(text);
+              onObjectiveChange(chip);
+              onStart(chip);
             }}
           >
             {chip}
@@ -144,14 +145,14 @@ export function CompassHome({
       <section className="compass-section">
         <h2 className="compass-section-label">Where should I look?</h2>
         <p className="compass-muted" style={{ marginTop: 0 }}>
-          Connected mailboxes from Settings — only real accounts you have OAuth&apos;d
+          Connected mailboxes — only real accounts you have OAuth&apos;d
         </p>
         {accountsError ? <p className="compass-warn">{accountsError}</p> : null}
         {liveAccounts === null ? <p className="compass-muted">Loading mailboxes…</p> : null}
         {liveAccounts && displayAccounts.length === 0 ? (
           <p className="compass-muted">
-            No mailboxes loaded. Connect Edge, Northwyn, Galaxy, or Careers in{" "}
-            <a href="/settings">Settings</a>.
+            No mailboxes loaded. Connect Edge, Northwyn, Galaxy, or Careers on the{" "}
+            <a href="/">Contacts</a> page.
           </p>
         ) : null}
         <div className="compass-account-grid">

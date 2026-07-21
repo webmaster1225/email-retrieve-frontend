@@ -42,8 +42,8 @@ function isMailboxSelectable(account: MailboxAccount) {
   return account.connected && account.status !== "reconnect_needed";
 }
 
-function mailboxStatusLabel(account: MailboxAccount) {
-  if (account.status === "syncing") return "Syncing";
+function mailboxStatusLabel(account: MailboxAccount, isSyncing = false) {
+  if (isSyncing || account.status === "syncing") return "Syncing";
   if (account.status === "reconnect_needed") return "Reconnect needed";
   if (account.connected) return "Connected";
   return "Disconnected";
@@ -710,13 +710,41 @@ export default function HomePage() {
           a.id === account.id ? { ...a, status: "syncing", plain_message: "Syncing…" } : a
         )
       );
-      if (account.id === selectedAccountIdRef.current) {
+      // Show contacts for the mailbox being synced so progress is visible.
+      if (account.id !== selectedAccountIdRef.current) {
+        selectMailbox(account);
+      } else {
         clearContactCache();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start sync");
       setSyncingId(null);
       syncAccountIdRef.current = null;
+      void refreshAccounts();
+    }
+  }
+
+  async function stopMailboxSync(account: MailboxAccount) {
+    setError(null);
+    try {
+      const stopped = await api.stopAccountSync(account.id);
+      syncAccountIdRef.current = null;
+      setSyncingId(null);
+      setSync(stopped);
+      setAccounts((prev) =>
+        prev.map((a) =>
+          a.id === account.id
+            ? { ...a, status: "connected", plain_message: a.plain_message || "Connected" }
+            : a
+        )
+      );
+      await refreshAccounts();
+      if (account.id === selectedAccountIdRef.current) {
+        await refreshStats(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to stop sync");
+      void refreshAccounts();
     }
   }
 
@@ -977,15 +1005,9 @@ export default function HomePage() {
         </div>
         <div className="actions">
           {!mailboxConnected ? (
-            ACCOUNTS_UI ? (
-              <a className="button primary" href="/settings">
-                Connect email in Settings
-              </a>
-            ) : (
-              <a className="button primary" href={api.loginUrl()}>
-                Connect Microsoft Outlook
-              </a>
-            )
+            <a className="button primary" href={api.loginUrl()}>
+              Connect Microsoft Outlook
+            </a>
           ) : (
             <>
               {!ACCOUNTS_UI ? (
@@ -1038,9 +1060,6 @@ export default function HomePage() {
           <aside className="mailbox-sidebar" aria-label="Email accounts">
             <div className="mailbox-sidebar-head">
               <h2>Mailboxes</h2>
-              <a href="/settings" className="mailbox-sidebar-link">
-                Settings
-              </a>
             </div>
             <ul className="mailbox-list">
               {accounts.length === 0 ? (
@@ -1109,10 +1128,14 @@ export default function HomePage() {
                             <span className="mailbox-item-status">
                               <span
                                 className={`mailbox-item-badge${
-                                  selectable ? " is-connected" : " is-offline"
+                                  isAccountSyncing
+                                    ? " is-syncing"
+                                    : selectable
+                                      ? " is-connected"
+                                      : " is-offline"
                                 }`}
                               >
-                                {mailboxStatusLabel(account)}
+                                {mailboxStatusLabel(account, isAccountSyncing)}
                               </span>
                               {account.last_sync_plain ? (
                                 <span className="mailbox-item-sync">
@@ -1140,17 +1163,24 @@ export default function HomePage() {
                         {selectable ? (
                           <button
                             type="button"
-                            className={`button primary mailbox-connect-btn mailbox-sync-btn${isAccountSyncing ? " is-spinning" : ""}`}
-                            disabled={isAccountSyncing}
-                            onClick={() => syncMailbox(account)}
-                            title={isAccountSyncing ? "Syncing…" : `Sync ${account.display_name}`}
+                            className={`button mailbox-connect-btn${
+                              isAccountSyncing ? " secondary mailbox-stop-btn" : " primary"
+                            }`}
+                            onClick={() =>
+                              isAccountSyncing ? stopMailboxSync(account) : syncMailbox(account)
+                            }
+                            title={
+                              isAccountSyncing
+                                ? `Stop syncing ${account.display_name}`
+                                : `Sync ${account.display_name}`
+                            }
                             aria-label={
                               isAccountSyncing
-                                ? `Syncing ${account.display_name}`
+                                ? `Stop syncing ${account.display_name}`
                                 : `Sync ${account.display_name}`
                             }
                           >
-                            Sync
+                            {isAccountSyncing ? "Stop" : "Sync"}
                           </button>
                         ) : null}
                       </div>
@@ -1229,7 +1259,7 @@ export default function HomePage() {
                   <tr>
                     <td colSpan={11}>
                       {ACCOUNTS_UI
-                        ? "Select a connected mailbox on the left, or connect one in Settings."
+                        ? "Select a connected mailbox on the left, or connect one with Connect on a mailbox."
                         : "Connect Microsoft Outlook to load contacts from Sent Items."}
                     </td>
                   </tr>

@@ -23,6 +23,7 @@ export interface EvidenceItem {
   direction: string;
   subject: string;
   summary: string;
+  outlookWeblink?: string | null;
 }
 
 export interface CampaignCandidateView {

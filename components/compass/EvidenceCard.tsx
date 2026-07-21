@@ -56,7 +56,7 @@ export function EvidenceCard({
       </header>
 
       <div className="compass-evidence-why">
-        <span className="compass-plan-key">Why her</span>
+        <span className="compass-plan-key">Why them</span>
         <p>{candidate.whyHer}</p>
       </div>
 
@@ -78,7 +78,13 @@ export function EvidenceCard({
             <li key={i}>
               <span className="compass-badge">{e.mailbox}</span> {e.date} · {e.direction} ·{" "}
               <em>{e.subject}</em> — {e.summary}{" "}
-              <span className="compass-muted">Open in Outlook</span>
+              {e.outlookWeblink ? (
+                <a href={e.outlookWeblink} target="_blank" rel="noreferrer">
+                  Open in Outlook
+                </a>
+              ) : (
+                <span className="compass-muted">No link</span>
+              )}
             </li>
           ))}
         </ul>

@@ -98,6 +98,7 @@ export function candidateToFixture(c: CampaignCandidateOut): CampaignCandidateVi
     direction: e.direction || "outbound",
     subject: e.subject || "(no subject)",
     summary: e.summary || "",
+    outlookWeblink: e.outlook_weblink || null,
   }));
 
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;

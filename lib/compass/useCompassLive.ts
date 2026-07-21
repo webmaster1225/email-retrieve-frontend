@@ -12,7 +12,6 @@ import {
 } from "@/lib/api";
 import {
   COPY,
-  NORTHWYN_OBJECTIVE,
 } from "./northwynScenario";
 import type {
   AccountId,
@@ -31,7 +30,7 @@ import {
   sendingOptionsForCampaign,
 } from "./accountUtils";
 import { candidateToFixture, planToFixture } from "./liveMappers";
-import { CompassStage, NEXT_DECISION } from "./stages";
+import { CompassStage, NEXT_DECISION, stageFromCampaignStatus } from "./stages";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -114,6 +113,13 @@ export function useCompassLive() {
   const [sendPreviewEmails, setSendPreviewEmails] = useState<string[]>([]);
   const [sendPreviewNames, setSendPreviewNames] = useState<string[]>([]);
   const [researchMode, setResearchMode] = useState("relationship_only");
+  const [preflightAttention, setPreflightAttention] = useState<{
+    missing_email: Array<{ id: string; name: string }>;
+    recently_messaged: Array<{ id: string; name: string }>;
+    call_better: Array<{ id: string; name: string }>;
+    needs_review: Array<{ id: string; name: string }>;
+    duplicates: Array<{ id: string; name: string }>;
+  } | null>(null);
   const [strategyNotes, setStrategyNotes] = useState("");
   const [tracking, setTracking] = useState<CampaignTrackingOut | null>(null);
   const [followUps, setFollowUps] = useState<FollowUpOut[]>([]);
@@ -247,7 +253,11 @@ export function useCompassLive() {
 
   const startCampaign = useCallback(
     async (obj: string) => {
-      const trimmed = obj.trim() || NORTHWYN_OBJECTIVE;
+      const trimmed = obj.trim();
+      if (!trimmed) {
+        showToast("Enter an objective to get started");
+        return;
+      }
       setObjective(trimmed);
       setBusy(true);
       setPendingNl(null);
@@ -259,7 +269,7 @@ export function useCompassLive() {
           return !acct || acct.connected;
         });
         if (!accountIds.length) {
-          showToast("Select at least one connected mailbox in Settings");
+          showToast("Select at least one connected mailbox on Contacts");
           setBusy(false);
           return;
         }
@@ -393,6 +403,27 @@ export function useCompassLive() {
     );
     setStageOverride("confirm");
   }, [decisions, liveCandidates, push]);
+
+  const batchApproveHighConfidence = useCallback(async () => {
+    if (!campaign) return;
+    const high = liveCandidates.filter((c) => c.confidence === "High");
+    if (!high.length) {
+      showToast("No high-confidence candidates to batch-approve");
+      return;
+    }
+    const items = high.map((c) => ({ candidate_id: c.id, decision: "include" as const }));
+    setDecisions((prev) => {
+      const next = { ...prev };
+      for (const c of high) next[c.id] = "include";
+      return next;
+    });
+    try {
+      await api.setCampaignDecisions(campaign.id, items);
+      push(agent(`Included ${high.length} high-confidence contacts.`));
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Batch approve failed");
+    }
+  }, [campaign, liveCandidates, push, showToast]);
 
   const confirmCampaign = useCallback(
     async (notes: string) => {
@@ -532,7 +563,7 @@ export function useCompassLive() {
   );
 
   const applyTone = useCallback(
-    async (id: string | "all", mode: "shorter" | "warmer" | "direct") => {
+    async (id: string | "all", mode: "shorter" | "warmer" | "direct" | "formal") => {
       if (!campaign) return;
       try {
         const draft = id === "all" ? null : liveDrafts.find((d) => d.candidate_id === id);
@@ -668,7 +699,7 @@ export function useCompassLive() {
       );
       const accountId = acct?.id || campaign.account_ids?.[0];
       if (!accountId) {
-        showToast("No connected sending account — connect a mailbox in Settings");
+        showToast("No connected sending account — connect a mailbox on Contacts");
         return;
       }
       try {
@@ -680,6 +711,12 @@ export function useCompassLive() {
         setSendingAccount(acct?.email || email);
         push(user(`Confirm <${email}>`), agent("Ready for final review — save drafts or authorize send."));
         setStageOverride("review");
+        try {
+          const pf = await api.campaignPreflight(campaign.id);
+          setPreflightAttention(pf.attention);
+        } catch {
+          setPreflightAttention(null);
+        }
       } catch (e) {
         showToast(e instanceof Error ? e.message : "Sending account failed");
       }
@@ -827,16 +864,30 @@ export function useCompassLive() {
       try {
         const c = await api.getCampaign(id);
         syncFromCampaign(c);
-        await loadCandidates(id);
-        await enterTracking(id);
-        push(agent(`Opened campaign: ${c.title || c.objective_raw.slice(0, 60)}`));
+        setObjective(c.objective_raw || "");
+        const stage = stageFromCampaignStatus(c.status);
+        setStageOverride(stage);
+        let cands = liveCandidates;
+        if (["cards", "confirm", "research", "drafts", "sendAcct", "review", "tracking"].includes(stage)) {
+          cands = await loadCandidates(id);
+        }
+        if (["research", "drafts", "sendAcct", "review", "tracking"].includes(stage)) {
+          await loadFacts(id, cands);
+        }
+        if (["drafts", "sendAcct", "review", "tracking"].includes(stage)) {
+          await loadDrafts(id);
+        }
+        if (stage === "tracking") {
+          await enterTracking(id);
+        }
+        push(agent(`Resumed at ${stage}: ${c.title || c.objective_raw.slice(0, 60)}`));
       } catch (e) {
         showToast(e instanceof Error ? e.message : "Open campaign failed");
       } finally {
         setBusy(false);
       }
     },
-    [enterTracking, loadCandidates, push, showToast, syncFromCampaign],
+    [enterTracking, liveCandidates, loadCandidates, loadDrafts, loadFacts, push, showToast, syncFromCampaign],
   );
   const handleNl = useCallback(
     async (text: string) => {
@@ -1047,6 +1098,7 @@ export function useCompassLive() {
     advanceFromClarify,
     approvePlan,
     finishCards,
+    batchApproveHighConfidence,
     confirmCampaign,
     finishResearch,
     applyTone,
@@ -1094,6 +1146,7 @@ export function useCompassLive() {
     liveDrafts,
     researchMode,
     setResearchMode,
+    preflightAttention,
     strategyNotes,
     setStrategyNotes,
     personNameFor,

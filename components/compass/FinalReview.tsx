@@ -7,6 +7,7 @@ type Props = {
   searched: string;
   sendingAccount: string;
   usedFacts: number;
+  researchMode?: string | null;
   approvedIds: string[];
   sendableCount: number;
   sendConfirmOpen: boolean;
@@ -19,6 +20,13 @@ type Props = {
   onDropMissingEmail: () => void;
   candidates: CampaignCandidateView[];
   sendPreviewNames?: string[];
+  preflightAttention?: {
+    missing_email: Array<{ id: string; name: string }>;
+    recently_messaged: Array<{ id: string; name: string }>;
+    call_better: Array<{ id: string; name: string }>;
+    needs_review: Array<{ id: string; name: string }>;
+    duplicates: Array<{ id: string; name: string }>;
+  } | null;
 };
 
 export function FinalReview({
@@ -26,6 +34,7 @@ export function FinalReview({
   searched,
   sendingAccount,
   usedFacts,
+  researchMode,
   approvedIds,
   sendableCount,
   sendConfirmOpen,
@@ -38,11 +47,22 @@ export function FinalReview({
   onDropMissingEmail,
   candidates,
   sendPreviewNames,
+  preflightAttention,
 }: Props) {
   const included = candidates.filter((c) => approvedIds.includes(c.id));
-  const missingEmail = included.find((c) => c.missingEmail);
-  const recent = included.filter((c) => c.recentContact);
-  const callBetter = included.filter((c) => c.callBetter);
+  const missingEmail =
+    preflightAttention?.missing_email?.[0] ||
+    included.find((c) => c.missingEmail);
+  const recent =
+    preflightAttention?.recently_messaged?.length
+      ? preflightAttention.recently_messaged
+      : included.filter((c) => c.recentContact);
+  const callBetter =
+    preflightAttention?.call_better?.length
+      ? preflightAttention.call_better
+      : included.filter((c) => c.callBetter);
+  const needsReview = preflightAttention?.needs_review || [];
+  const duplicates = preflightAttention?.duplicates || [];
   const sendNames =
     sendPreviewNames && sendPreviewNames.length > 0
       ? sendPreviewNames
@@ -55,7 +75,7 @@ export function FinalReview({
       <p className="compass-muted">
         Searched: {searched} · Sending: &lt;{sendingAccount}&gt;
         <br />
-        External facts used: {usedFacts} (approved)
+        Research: {researchMode || "—"} · External facts used: {usedFacts} (approved)
       </p>
 
       <div className="compass-attention">
@@ -63,19 +83,35 @@ export function FinalReview({
         <ul>
           {missingEmail ? (
             <li>
-              Missing email ({missingEmail.name}) —{" "}
+              Missing email ({"name" in missingEmail ? missingEmail.name : (missingEmail as { name: string }).name}) —{" "}
               <button type="button" className="compass-text-link" onClick={onDropMissingEmail}>
                 Drop
               </button>
             </li>
           ) : null}
           {recent.length > 0 ? (
-            <li>Recently contacted: {recent.map((c) => c.name).join(", ")}</li>
+            <li>
+              Recently contacted: {recent.map((c) => ("name" in c ? c.name : "")).join(", ")}
+            </li>
           ) : null}
           {callBetter.length > 0 ? (
-            <li>Call may land better: {callBetter.map((c) => c.name).join(", ")}</li>
+            <li>
+              Call may land better: {callBetter.map((c) => ("name" in c ? c.name : "")).join(", ")}
+            </li>
           ) : null}
-          {!missingEmail && recent.length === 0 && callBetter.length === 0 ? (
+          {needsReview.length > 0 ? (
+            <li>
+              Drafts needing review: {needsReview.map((c) => c.name).join(", ")}
+            </li>
+          ) : null}
+          {duplicates.length > 0 ? (
+            <li>Duplicates: {duplicates.map((c) => c.name).join(", ")}</li>
+          ) : null}
+          {!missingEmail &&
+          recent.length === 0 &&
+          callBetter.length === 0 &&
+          needsReview.length === 0 &&
+          duplicates.length === 0 ? (
             <li className="compass-muted">None</li>
           ) : null}
         </ul>

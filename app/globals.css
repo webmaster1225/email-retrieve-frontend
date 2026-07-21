@@ -996,6 +996,11 @@ tr.row-denied:hover td {
   font-size: 0.8rem;
 }
 
+.mailbox-stop-btn {
+  border-color: var(--danger-border, #f1aeb5);
+  color: var(--danger, #b42318);
+}
+
 .mailbox-item-top {
   display: flex;
   align-items: center;
@@ -1023,6 +1028,12 @@ tr.row-denied:hover td {
   background: var(--success-soft);
   color: var(--success);
   border: 1px solid var(--success-border);
+}
+
+.mailbox-item-badge.is-syncing {
+  background: var(--accent-soft, #e8f0fe);
+  color: var(--accent, #1a56db);
+  border: 1px solid var(--accent-border, #b6d0fe);
 }
 
 .mailbox-item-badge.is-offline {
