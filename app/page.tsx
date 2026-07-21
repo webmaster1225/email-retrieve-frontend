@@ -535,42 +535,6 @@ export default function HomePage() {
   ]);
 
   useEffect(() => {
-    if (!mailboxConnected || !stats || stats.external_contacts > 0 || stats.synced_messages > 0) return;
-    if (sync?.status === "running") return;
-    // Auto-start sync only for legacy single-mailbox / Edge flow.
-    if (ACCOUNTS_UI && selectedAccountId && selectedAccountId !== "edge") return;
-
-    let cancelled = false;
-    (async () => {
-      const status = ACCOUNTS_UI && selectedAccountId
-        ? await api.accountSyncStatus(selectedAccountId)
-        : await api.syncStatus();
-      if (cancelled) return;
-      if (status?.status === "running") {
-        setSync(status);
-        return;
-      }
-      try {
-        const run =
-          ACCOUNTS_UI && selectedAccountId
-            ? await api.syncAccount(selectedAccountId)
-            : await api.startSync();
-        if (!cancelled) {
-          syncAccountIdRef.current = selectedAccountId || "edge";
-          setSyncingId(selectedAccountId || "edge");
-          setSync(run);
-        }
-      } catch {
-        // User can start sync manually.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mailboxConnected, selectedAccountId, stats?.external_contacts, stats?.synced_messages, sync?.status]);
-
-  useEffect(() => {
     if (!sync || sync.status !== "running") return;
     const timer = setInterval(async () => {
       const syncAccountId = syncAccountIdRef.current || selectedAccountIdRef.current;
