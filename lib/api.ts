@@ -710,7 +710,11 @@ export const api = {
     apiFetch<CampaignTrackingOut>(`/campaigns/${id}/tracking/refresh`, { method: "POST" }),
 
   proposeFollowUps: (id: string) =>
-    apiFetch<{ items: FollowUpOut[] }>(`/campaigns/${id}/follow-ups/propose`, {
+    apiFetch<{
+      items: FollowUpOut[];
+      reason?: string | null;
+      meta?: { sent_logs: number; no_response: number };
+    }>(`/campaigns/${id}/follow-ups/propose`, {
       method: "POST",
     }),
   listFollowUps: (id: string) => apiFetch<FollowUpOut[]>(`/campaigns/${id}/follow-ups`),
@@ -761,6 +765,13 @@ export type CampaignTrackingOut = {
     status: string;
   }>;
   suggestions: string[];
+  refresh_meta?: {
+    matched_new: number;
+    inbox_new: number;
+    sent_logs: number;
+    inbound_scanned: number;
+    inbox_error?: string | null;
+  };
 };
 
 export type FollowUpOut = {

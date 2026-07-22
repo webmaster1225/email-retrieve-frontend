@@ -900,7 +900,28 @@ export function useCompassLive() {
     try {
       const dash = await api.refreshCampaignTracking(campaign.id);
       setTracking(dash);
-      showToast("Tracking refreshed");
+      const meta = dash.refresh_meta;
+      if (meta) {
+        if (meta.inbox_error) {
+          showToast(
+            `Tracking refreshed from local mail (inbox sync failed: network timeout). Matched ${meta.matched_new}.`,
+          );
+        } else if (meta.sent_logs === 0) {
+          showToast(
+            "No campaign sends logged yet — enable FEATURE_COMPASS_SEND and authorize Gate 8 first",
+          );
+        } else if (meta.matched_new === 0 && (dash.replies?.length || 0) === 0) {
+          showToast(
+            `No replies matched (scanned ${meta.inbound_scanned} inbound, +${meta.inbox_new} new). Sync may need more inbox mail.`,
+          );
+        } else {
+          showToast(
+            `Tracking refreshed — ${meta.matched_new} new reply match(es), ${dash.replies?.length || 0} total`,
+          );
+        }
+      } else {
+        showToast("Tracking refreshed");
+      }
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Tracking refresh failed");
     }
@@ -911,7 +932,20 @@ export function useCompassLive() {
     try {
       const res = await api.proposeFollowUps(campaign.id);
       setFollowUps(await api.listFollowUps(campaign.id));
-      push(agent(`Proposed ${res.items?.length || 0} follow-up(s) — nothing sent (Gate 9).`));
+      const n = res.items?.length || 0;
+      if (n === 0) {
+        push(agent(res.reason || "No follow-ups to propose right now."));
+        showToast(res.reason || "No follow-ups proposed");
+      } else {
+        push(agent(`Proposed ${n} follow-up(s) — nothing sent (Gate 9).`));
+        showToast(`Proposed ${n} follow-up(s)`);
+      }
+      // Refresh tracking strip after promotions
+      try {
+        setTracking(await api.getCampaignTracking(campaign.id));
+      } catch {
+        /* ignore */
+      }
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Follow-ups disabled or failed");
     }
