@@ -1193,13 +1193,15 @@ export function useCompassLive() {
       campaign?.status === "draft";
     const externalProgress =
       current === "progress" &&
+      !draftProgress &&
       (campaign?.status === "external_research" ||
         (researchProgress || "").toLowerCase().includes("external"));
+    const draftingProgress = current === "progress" && draftProgress !== null;
 
-    let target = previousStage(current, { hadClarifying, externalProgress });
+    let target = previousStage(current, { hadClarifying, externalProgress, draftingProgress });
     // If drafts were generated without public facts, skip the empty research gate.
     if (
-      current === "drafts" &&
+      (current === "drafts" || draftingProgress) &&
       target === "research" &&
       !liveResearch.some((r) => r.facts.length > 0)
     ) {
@@ -1211,6 +1213,7 @@ export function useCompassLive() {
       stopPoll();
       setBusy(false);
       setResearchProgress("");
+      if (draftProgress) setDraftProgress(null);
     }
 
     if (target === "home") {
@@ -1247,6 +1250,7 @@ export function useCompassLive() {
     push(agent(`Stepped back to ${STAGE_LABELS[target]}.`));
   }, [
     campaign,
+    draftProgress,
     liveResearch,
     loadCandidates,
     loadDrafts,

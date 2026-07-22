@@ -14,15 +14,17 @@ export const FUNNEL_STEPS: { id: CompassStage; label: string }[] = [
   { id: "tracking", label: "Track" },
 ];
 
-function funnelIndex(stage: CompassStage): number {
+function funnelIndex(stage: CompassStage, isDrafting?: boolean): number {
   switch (stage) {
     case "home":
     case "clarify":
     case "campaigns":
       return -1;
     case "plan":
-    case "progress":
       return 0;
+    case "progress":
+      // Draft generation reuses the progress UI but belongs after Context.
+      return isDrafting ? 4 : 0;
     case "cards":
       return 1;
     case "confirm":
@@ -45,10 +47,12 @@ function funnelIndex(stage: CompassStage): number {
 
 type Props = {
   stage: CompassStage;
+  /** True while personalized drafts are being generated. */
+  isDrafting?: boolean;
 };
 
-export function StageStrip({ stage }: Props) {
-  const active = funnelIndex(stage);
+export function StageStrip({ stage, isDrafting }: Props) {
+  const active = funnelIndex(stage, isDrafting);
   if (active < 0) return null;
 
   return (

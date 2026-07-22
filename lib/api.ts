@@ -496,6 +496,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ objective, account_ids: accountIds }),
     }),
+  deleteCampaign: (id: string) =>
+    apiFetch<{ deleted: string[]; count: number }>(`/campaigns/${id}`, {
+      method: "DELETE",
+    }),
+  deleteCampaigns: (ids: string[]) =>
+    apiFetch<{ deleted: string[]; count: number }>(`/campaigns/bulk-delete`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
   getCampaign: (id: string) => apiFetch<CampaignOut>(`/campaigns/${id}`),
   clarifyCampaign: (id: string, data: { answer?: string; use_defaults?: boolean }) =>
     apiFetch<CampaignOut>(`/campaigns/${id}/clarify`, {

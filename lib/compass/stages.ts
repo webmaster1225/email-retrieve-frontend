@@ -50,9 +50,12 @@ export function previousStage(
     hadClarifying?: boolean;
     /** True when the progress spinner is for Gate-3 external research. */
     externalProgress?: boolean;
+    /** True when the progress spinner is for draft generation. */
+    draftingProgress?: boolean;
   },
 ): CompassStage | null {
   if (stage === "plan" && opts?.hadClarifying) return "clarify";
+  if (stage === "progress" && opts?.draftingProgress) return "research";
   if (stage === "progress" && opts?.externalProgress) return "confirm";
   return STAGE_BACK[stage] ?? null;
 }

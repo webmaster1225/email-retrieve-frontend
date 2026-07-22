@@ -495,7 +495,7 @@ export function CampaignWorkspace({ compass }: Props) {
 
   return (
     <div className="compass-workspace-wrap">
-      <StageStrip stage={stage} />
+      <StageStrip stage={stage} isDrafting={draftProgress !== null} />
       <div className="compass-workspace">
         <ConversationRail messages={messages} onSubmit={handleNl} />
         <main className="compass-work">
