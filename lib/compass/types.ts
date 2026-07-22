@@ -18,6 +18,7 @@ export interface AccountView {
 }
 
 export interface EvidenceItem {
+  id?: string;
   date: string;
   mailbox: string;
   direction: string;
@@ -82,6 +83,7 @@ export interface PlanView {
   exclude: string;
   later: string;
   assumption: string;
+  candidateLimit: number;
 }
 
 export interface ChatMessage {

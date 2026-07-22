@@ -27,6 +27,10 @@ type Props = {
   onOpenCampaign?: (id: string) => void;
 };
 
+function formatStatus(status: string) {
+  return status.replace(/_/g, " ");
+}
+
 export function CompassHome({
   objective,
   onObjectiveChange,
@@ -96,119 +100,150 @@ export function CompassHome({
 
   const activeCampaigns = liveCampaigns || [];
   const connectedCount = liveAccounts?.filter((a) => a.connected).length ?? 0;
+  const includedCount = displayAccounts.filter((a) => includedAccounts[a.id]).length;
 
   return (
     <div className="compass-home">
-      <h1 className="compass-home-title">
-        What would you like to accomplish through your relationships?
-      </h1>
-
-      <div className="compass-objective-row">
-        <textarea
-          className="compass-objective-input"
-          rows={3}
-          placeholder="e.g. Help with Northwyn's capital raise"
-          value={objective}
-          onChange={(e) => onObjectiveChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <button type="button" className="compass-mic" disabled title="Voice — coming later">
-          🎤
-        </button>
-      </div>
-
-      <div className="compass-chips">
-        {OBJECTIVE_CHIPS.map((chip) => (
-          <button
-            key={chip}
-            type="button"
-            className="compass-chip"
-            onClick={() => {
-              onObjectiveChange(chip);
-              onStart(chip);
-            }}
-          >
-            {chip}
-          </button>
-        ))}
-      </div>
-
-      <button type="button" className="button primary compass-start-btn" onClick={submit}>
-        Continue
-      </button>
-
-      <section className="compass-section">
-        <h2 className="compass-section-label">Where should I look?</h2>
-        <p className="compass-muted" style={{ marginTop: 0 }}>
-          Connected mailboxes — only real accounts you have OAuth&apos;d
-        </p>
-        {accountsError ? <p className="compass-warn">{accountsError}</p> : null}
-        {liveAccounts === null ? <p className="compass-muted">Loading mailboxes…</p> : null}
-        {liveAccounts && displayAccounts.length === 0 ? (
-          <p className="compass-muted">
-            No mailboxes loaded. Connect Edge, Northwyn, Galaxy, or Careers on the{" "}
-            <a href="/">Contacts</a> page.
+      <header className="compass-home-header">
+        <div>
+          <h1 className="compass-home-title">
+            What would you like to accomplish through your relationships?
+          </h1>
+          <p className="compass-home-subtitle">
+            Describe your goal, choose mailboxes, and continue — Compass ranks real
+            relationships from your synced history.
           </p>
-        ) : null}
-        <div className="compass-account-grid">
-          {displayAccounts.map((acct) => (
-            <AccountCard
-              key={acct.id}
-              account={acct}
-              included={includedAccounts[acct.id] ?? false}
-              liveStatus={"liveStatus" in acct ? acct.liveStatus : undefined}
-              connected={"connected" in acct ? acct.connected : undefined}
-              onToggle={() => onToggleAccount(acct.id)}
-              onDetails={() => onStub?.(`${acct.name} details`)}
-            />
-          ))}
         </div>
-      </section>
+        <p className="compass-home-meta">
+          <span>{connectedCount} connected</span>
+          <span>{includedCount} included</span>
+        </p>
+      </header>
 
-      <section className="compass-section">
-        <h2 className="compass-section-label">Active campaigns</h2>
-        {liveCampaigns === null ? <p className="compass-muted">Loading campaigns…</p> : null}
-        <ul className="compass-campaign-list">
-          {activeCampaigns.length === 0 && liveCampaigns !== null ? (
-            <li className="compass-muted">No campaigns yet — start with an objective above.</li>
-          ) : null}
-          {activeCampaigns.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className="compass-campaign-item"
-                onClick={() =>
-                  onOpenCampaign ? onOpenCampaign(c.id) : onStub?.(c.title || c.objective_raw || "")
+      <div className="compass-home-grid">
+        <section className="compass-home-start" aria-label="Active campaigns">
+          <div className="compass-home-panel-head">
+            <h2 className="compass-section-label">Active campaigns</h2>
+            <span className="compass-muted">{activeCampaigns.length} open</span>
+          </div>
+          <div className="compass-home-panel-body">
+            {liveCampaigns === null ? (
+              <p className="compass-muted">Loading campaigns…</p>
+            ) : null}
+            {activeCampaigns.length === 0 && liveCampaigns !== null ? (
+              <p className="compass-muted compass-home-empty">
+                No campaigns yet — start with an objective on the left.
+              </p>
+            ) : null}
+            <ul className="compass-campaign-list compass-campaign-list--home">
+              {activeCampaigns.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    className="compass-campaign-item compass-campaign-item--home"
+                    onClick={() =>
+                      onOpenCampaign
+                        ? onOpenCampaign(c.id)
+                        : onStub?.(c.title || c.objective_raw || "")
+                    }
+                  >
+                    <span className="compass-campaign-item-text">
+                      <strong>{c.title || c.objective_raw?.slice(0, 72) || c.id}</strong>
+                      <span className="compass-campaign-arrow" aria-hidden>
+                        →
+                      </span>
+                    </span>
+                    <span className="compass-campaign-item-meta">
+                      <span className="compass-status-pill">{formatStatus(c.status)}</span>
+                      {typeof c.sent === "number" ? `${c.sent} sent / ` : null}
+                      {typeof c.replied === "number" ? `${c.replied} replied` : null}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+        <div className="compass-home-panels">
+          <div className="compass-home-panel compass-home-panel--start" aria-label="Start a campaign">
+            <label className="compass-home-field-label" htmlFor="compass-objective">
+              Objective
+            </label>
+            <textarea
+              id="compass-objective"
+              className="compass-objective-input compass-objective-input--home"
+              rows={2}
+              placeholder="e.g. Help with Northwyn's capital raise"
+              value={objective}
+              onChange={(e) => onObjectiveChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
                 }
-              >
-                <span className="compass-campaign-arrow">▸</span>
-                <span>
-                  <strong>{c.title || c.objective_raw?.slice(0, 60) || c.id}</strong>
-                  <span className="compass-muted">
-                    {" "}
-                    — {c.status}
-                    {typeof c.sent === "number" ? ` · ${c.sent} sent` : ""}
-                    {typeof c.replied === "number" ? ` · ${c.replied} replied` : ""}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+              }}
+            />
 
-      <p className="compass-footer-note">
-        🔒 Connected: {connectedCount} account{connectedCount === 1 ? "" : "s"} · data stays in
-        your tenant ·{" "}
-        <button type="button" className="compass-text-link" onClick={() => onStub?.("Audit")}>
-          Audit
-        </button>
-      </p>
+            <p className="compass-home-field-label">Quick starts</p>
+            <div className="compass-chips compass-chips--home">
+              {OBJECTIVE_CHIPS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  className="compass-chip"
+                  onClick={() => {
+                    onObjectiveChange(chip);
+                    onStart(chip);
+                  }}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="button primary compass-start-btn compass-start-btn--home"
+              onClick={submit}
+              disabled={!objective.trim()}
+            >
+              Continue
+            </button>
+          </div>
+          <div className="compass-home-panel" aria-label="Mailboxes">
+            <div className="compass-home-panel-head">
+              <h2 className="compass-section-label">Where should I look?</h2>
+              <span className="compass-muted">
+                {includedCount}/{displayAccounts.length || 0} selected
+              </span>
+            </div>
+            <div className="compass-home-panel-body">
+              {accountsError ? <p className="compass-warn">{accountsError}</p> : null}
+              {liveAccounts === null ? (
+                <p className="compass-muted">Loading mailboxes…</p>
+              ) : null}
+              {liveAccounts && displayAccounts.length === 0 ? (
+                <p className="compass-muted">
+                  No mailboxes loaded. Connect accounts on the <a href="/">Contacts</a> page.
+                </p>
+              ) : null}
+              <div className="compass-account-grid compass-account-grid--home">
+                {displayAccounts.map((acct) => (
+                  <AccountCard
+                    key={acct.id}
+                    compact
+                    account={acct}
+                    included={includedAccounts[acct.id] ?? false}
+                    liveStatus={"liveStatus" in acct ? acct.liveStatus : undefined}
+                    connected={"connected" in acct ? acct.connected : undefined}
+                    onToggle={() => onToggleAccount(acct.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>   
+        </div>
+      </div>
     </div>
   );
 }

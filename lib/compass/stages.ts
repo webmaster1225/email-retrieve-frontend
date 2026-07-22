@@ -28,6 +28,35 @@ export const WORKSPACE_STAGES: CompassStage[] = [
   "campaigns",
 ];
 
+/** Linear back targets for the main campaign funnel. */
+export const STAGE_BACK: Partial<Record<CompassStage, CompassStage>> = {
+  clarify: "home",
+  plan: "home",
+  progress: "plan",
+  cards: "plan",
+  confirm: "cards",
+  research: "confirm",
+  drafts: "research",
+  sendAcct: "drafts",
+  review: "sendAcct",
+  tracking: "review",
+  done: "tracking",
+  campaigns: "home",
+};
+
+export function previousStage(
+  stage: CompassStage,
+  opts?: {
+    hadClarifying?: boolean;
+    /** True when the progress spinner is for Gate-3 external research. */
+    externalProgress?: boolean;
+  },
+): CompassStage | null {
+  if (stage === "plan" && opts?.hadClarifying) return "clarify";
+  if (stage === "progress" && opts?.externalProgress) return "confirm";
+  return STAGE_BACK[stage] ?? null;
+}
+
 export function stageFromCampaignStatus(status: string | null | undefined): CompassStage {
   switch (status) {
     case "draft":
@@ -35,6 +64,7 @@ export function stageFromCampaignStatus(status: string | null | undefined): Comp
       return "clarify";
     case "planning":
     case "plan_ready":
+    case "plan_pending":
       return "plan";
     case "researching":
       return "progress";
@@ -44,11 +74,13 @@ export function stageFromCampaignStatus(status: string | null | undefined): Comp
     case "awaiting_confirm":
       return "confirm";
     case "external_research":
+    case "reviewing_facts":
       return "research";
     case "drafting":
     case "reviewing_drafts":
       return "drafts";
     case "awaiting_sending_account":
+    case "awaiting_send_account":
       return "sendAcct";
     case "ready_to_save":
     case "scheduled":

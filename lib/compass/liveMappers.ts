@@ -24,7 +24,14 @@ function strengthDots(label: string | null): number {
   }
 }
 
-function confidenceFromRelevance(label: string | null): "High" | "Medium" | "Low" {
+function confidenceFromFlagsAndRelevance(
+  flags: string[] | null | undefined,
+  label: string | null,
+): "High" | "Medium" | "Low" {
+  const f = flags || [];
+  if (f.includes("confidence_high")) return "High";
+  if (f.includes("confidence_low")) return "Low";
+  if (f.includes("confidence_medium")) return "Medium";
   if (label === "high_relevance") return "High";
   if (label === "low_relevance" || label === "unclear") return "Low";
   return "Medium";
@@ -67,6 +74,10 @@ export function planToFixture(campaign: CampaignOut): PlanView {
         "External research later for approved contacts only",
     ),
     assumption: assumptions || "Defaults applied where you didn't specify",
+    candidateLimit: Math.max(
+      5,
+      Math.min(100, Number(p.candidate_limit) || 30),
+    ),
   };
 }
 
@@ -86,8 +97,12 @@ export function candidateToFixture(c: CampaignCandidateOut): CampaignCandidateVi
     }
   }
   if (!c.email) warnings.push("No verified email on file");
+  if ((c.flags || []).includes("blast_only_or_no_signal")) {
+    warnings.push("No genuine exchange after suppressing noise — review carefully");
+  }
 
   const evidence = (c.evidence || []).map((e) => ({
+    id: e.id,
     date: e.occurred_at
       ? new Date(e.occurred_at).toLocaleDateString(undefined, {
           year: "numeric",
@@ -119,7 +134,7 @@ export function candidateToFixture(c: CampaignCandidateOut): CampaignCandidateVi
     mailboxes: badges || "—",
     likelyRole: c.role_label || "contact",
     roleGroup: roleGroup(c.role_label),
-    confidence: confidenceFromRelevance(c.relevance_label),
+    confidence: confidenceFromFlagsAndRelevance(c.flags, c.relevance_label),
     whyHer: c.why_text || "Limited evidence.",
     strength: strengthDots(c.strength_label),
     lastTouch: evidence[0]?.date || "—",

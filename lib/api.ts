@@ -545,6 +545,23 @@ export const api = {
       `/campaigns/${id}/nl-ops/apply`,
       { method: "POST", body: JSON.stringify({ instruction }) },
     ),
+  suppressCampaignThread: (
+    id: string,
+    subject: string,
+    opts?: { evidence_id?: string; rerun_research?: boolean },
+  ) =>
+    apiFetch<{
+      suppressed_subjects: string[];
+      research_restarted: boolean;
+      campaign: CampaignOut;
+    }>(`/campaigns/${id}/suppress-thread`, {
+      method: "POST",
+      body: JSON.stringify({
+        subject,
+        evidence_id: opts?.evidence_id || null,
+        rerun_research: opts?.rerun_research !== false,
+      }),
+    }),
   campaignAudit: (id: string) =>
     apiFetch<
       Array<{

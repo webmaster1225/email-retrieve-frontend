@@ -12,6 +12,7 @@ import { DraftCard } from "./DraftCard";
 import { FinalReview } from "./FinalReview";
 import { TrackingDashboard } from "./TrackingDashboard";
 import { CampaignsList } from "./CampaignsList";
+import { StageStrip } from "./StageStrip";
 
 type Props = {
   compass: CompassController;
@@ -40,6 +41,7 @@ export function CampaignWorkspace({ compass }: Props) {
     setDecision,
     expandedEvidence,
     toggleEvidence,
+    suppressThread,
     factDecisions,
     setFact,
     draftStatuses,
@@ -63,6 +65,7 @@ export function CampaignWorkspace({ compass }: Props) {
     nextDecision,
     advanceFromClarify,
     approvePlan,
+    reviseCandidateLimit,
     finishCards,
     batchApproveHighConfidence,
     confirmCampaign,
@@ -76,6 +79,8 @@ export function CampaignWorkspace({ compass }: Props) {
     authorizeSend,
     handleNl,
     reset,
+    goBack,
+    canGoBack,
     showToast,
     formatRoleSummary,
     planView,
@@ -150,7 +155,14 @@ export function CampaignWorkspace({ compass }: Props) {
       </div>
     );
   } else if (stage === "plan") {
-    work = <PlanCard onApprove={approvePlan} plan={planView} busy={busy} />;
+    work = (
+      <PlanCard
+        onApprove={approvePlan}
+        onCandidateLimitChange={reviseCandidateLimit}
+        plan={planView}
+        busy={busy}
+      />
+    );
   } else if (stage === "progress") {
     work = (
       <div className="compass-work-block compass-progress">
@@ -185,6 +197,7 @@ export function CampaignWorkspace({ compass }: Props) {
               evidenceOpen={!!expandedEvidence[c.id]}
               onDecision={(d) => setDecision(c.id, d)}
               onToggleEvidence={() => toggleEvidence(c.id)}
+              onIgnoreThread={(subject, evidenceId) => suppressThread(subject, evidenceId)}
             />
           ))}
         </div>
@@ -464,21 +477,41 @@ export function CampaignWorkspace({ compass }: Props) {
   }
 
   return (
-    <div className="compass-workspace">
-      <ConversationRail messages={messages} onSubmit={handleNl} />
-      <main className="compass-work">{work}</main>
-      <CampaignSummary
-        objective={objective}
-        mailboxes={accountLabels}
-        found={cardCandidates.length}
-        approved={approvedIds.length}
-        researched={researchForApproved.length}
-        drafted={draftedCount}
-        sendingAccount={sendingAccount}
-        nextDecision={nextDecision}
-        open={summaryOpen}
-        onToggle={() => setSummaryOpen(!summaryOpen)}
-      />
+    <div className="compass-workspace-wrap">
+      <StageStrip stage={stage} />
+      <div className="compass-workspace">
+        <ConversationRail messages={messages} onSubmit={handleNl} />
+        <main className="compass-work">
+          {canGoBack ? (
+            <div className="compass-back-bar">
+              <button
+                type="button"
+                className="compass-back-btn"
+                onClick={() => goBack()}
+                disabled={busy && stage !== "progress"}
+              >
+                ← Back
+              </button>
+              {stage === "progress" ? (
+                <span className="compass-muted">Cancel and return to the previous step</span>
+              ) : null}
+            </div>
+          ) : null}
+          {work}
+        </main>
+        <CampaignSummary
+          objective={objective}
+          mailboxes={accountLabels}
+          found={cardCandidates.length}
+          approved={approvedIds.length}
+          researched={researchForApproved.length}
+          drafted={draftedCount}
+          sendingAccount={sendingAccount}
+          nextDecision={nextDecision}
+          open={summaryOpen}
+          onToggle={() => setSummaryOpen(!summaryOpen)}
+        />
+      </div>
     </div>
   );
 }

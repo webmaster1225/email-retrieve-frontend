@@ -30,7 +30,7 @@ import {
   sendingOptionsForCampaign,
 } from "./accountUtils";
 import { candidateToFixture, planToFixture } from "./liveMappers";
-import { CompassStage, NEXT_DECISION, stageFromCampaignStatus } from "./stages";
+import { CompassStage, NEXT_DECISION, STAGE_LABELS, previousStage, stageFromCampaignStatus } from "./stages";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -145,6 +145,7 @@ export function useCompassLive() {
     {} as Record<AccountId, boolean>,
   );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const goBackRef = useRef<(() => Promise<void>) | null>(null);
 
   const applyLiveAccountDefaults = useCallback(
     (rows: { id: string; default_included: boolean; connected?: boolean }[]) => {
@@ -377,6 +378,27 @@ export function useCompassLive() {
     }
   }, [campaign, loadCandidates, push, showToast, stopPoll, syncFromCampaign]);
 
+  const reviseCandidateLimit = useCallback(
+    async (limit: number) => {
+      if (!campaign) return;
+      const clamped = Math.max(5, Math.min(100, Math.round(limit)));
+      setBusy(true);
+      try {
+        const c = await api.revisePlan(campaign.id, `candidate_limit ${clamped}`);
+        syncFromCampaign(c);
+        push(
+          user(`Show top ${clamped}`),
+          agent(`Got it — I'll surface the top ${clamped} ranked candidates.`),
+        );
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Could not update candidate limit");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [campaign, push, showToast, syncFromCampaign],
+  );
+
   const setDecision = useCallback(
     async (id: string, d: ContactDecision) => {
       setDecisions((prev) => ({ ...prev, [id]: d }));
@@ -394,15 +416,74 @@ export function useCompassLive() {
     setExpandedEvidence((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const finishCards = useCallback(() => {
-    const approved = liveCandidates.filter((c) => decisions[c.id] === "include").length;
+  const suppressThread = useCallback(
+    async (subject: string, evidenceId?: string) => {
+      if (!campaign) return;
+      try {
+        setBusy(true);
+        const res = await api.suppressCampaignThread(campaign.id, subject, {
+          evidence_id: evidenceId,
+          rerun_research: true,
+        });
+        syncFromCampaign(res.campaign);
+        showToast(`Ignoring thread — re-ranking candidates…`);
+        push(agent(`I'll ignore threads matching “${subject.slice(0, 80)}” and recompute hooks.`));
+        // Poll research status briefly then reload candidates
+        stopPoll();
+        let ticks = 0;
+        pollRef.current = setInterval(async () => {
+          ticks += 1;
+          try {
+            const st = await api.campaignResearchStatus(campaign.id);
+            if (st.campaign) syncFromCampaign(st.campaign);
+            if (st.status === "completed" || st.status === "failed" || ticks > 40) {
+              stopPoll();
+              setBusy(false);
+              if (st.status === "completed") {
+                await loadCandidates(campaign.id);
+                showToast("Candidates refreshed without suppressed threads");
+              } else if (st.status === "failed") {
+                showToast(st.error || "Research refresh failed");
+              }
+            }
+          } catch (e) {
+            stopPoll();
+            setBusy(false);
+            showToast(e instanceof Error ? e.message : "Refresh failed");
+          }
+        }, 1500);
+      } catch (e) {
+        setBusy(false);
+        showToast(e instanceof Error ? e.message : "Could not ignore thread");
+      }
+    },
+    [campaign, loadCandidates, push, showToast, stopPoll, syncFromCampaign],
+  );
+
+  const finishCards = useCallback(async () => {
+    if (!campaign) return;
+    // Persist the current decisions (defaults to "include") so the backend
+    // marks candidates as included before drafting. Without this, generate
+    // drafts finds no "include" rows and returns an empty array.
+    const items = liveCandidates.map((c) => ({
+      candidate_id: c.id,
+      decision: (decisions[c.id] ?? "include") as "include" | "pass" | "unsure",
+    }));
+    const approved = items.filter((i) => i.decision === "include").length;
+    try {
+      if (items.length) {
+        await api.setCampaignDecisions(campaign.id, items);
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not save contact selection");
+    }
     push(
       agent(
         `You approved ${approved}. Next: message notes and research mode, then I'll scan public context (Gate 3).`,
       ),
     );
     setStageOverride("confirm");
-  }, [decisions, liveCandidates, push]);
+  }, [campaign, decisions, liveCandidates, push, showToast]);
 
   const batchApproveHighConfidence = useCallback(async () => {
     if (!campaign) return;
@@ -446,24 +527,56 @@ export function useCompassLive() {
             const st = await api.externalResearchStatus(campaign.id);
             setResearchProgress(st.progress || st.status);
             if (st.campaign) syncFromCampaign(st.campaign);
-            if (st.status === "completed") {
+            if (st.status === "completed" || st.status === "failed") {
               stopPoll();
+              if (st.status === "failed") {
+                push(
+                  agent(
+                    st.progress ||
+                      "External research failed — drafting from relationship history.",
+                  ),
+                );
+              }
               const cands = liveCandidates.length
                 ? liveCandidates
                 : await loadCandidates(campaign.id);
-              await loadFacts(campaign.id, cands);
-              push(agent("External context ready for review (Gate 3). Approve, background, or reject each fact."));
-              setStageOverride("research");
-              setBusy(false);
-            } else if (st.status === "failed") {
-              stopPoll();
-              push(agent(st.progress || "External research failed — continuing with relationship history."));
-              const cands = liveCandidates.length
-                ? liveCandidates
-                : await loadCandidates(campaign.id);
-              await loadFacts(campaign.id, cands);
-              setStageOverride("research");
-              setBusy(false);
+              const research = await loadFacts(campaign.id, cands);
+              const hasFactsToReview = research.some((r) => r.facts.length > 0);
+              if (hasFactsToReview) {
+                // Gate 3: public facts exist — let the user approve/reject first.
+                push(
+                  agent(
+                    "External context ready for review (Gate 3). Approve, background, or reject each fact.",
+                  ),
+                );
+                setStageOverride("research");
+                setBusy(false);
+              } else {
+                // No public facts to review — draft straight from the last
+                // conversations using AI (relationship-only personalization).
+                push(
+                  agent(
+                    "No public facts to review — drafting personalized messages from your recent conversations…",
+                  ),
+                );
+                setResearchProgress("Drafting personalized messages…");
+                try {
+                  await api.generateCampaignDrafts(campaign.id);
+                  await loadDrafts(campaign.id);
+                  push(
+                    agent(
+                      "Drafts ready (Gate 4). Approve or edit, then confirm the sending account.",
+                    ),
+                  );
+                  setStageOverride("drafts");
+                } catch (genErr) {
+                  showToast(
+                    genErr instanceof Error ? genErr.message : "Draft generation failed",
+                  );
+                  setStageOverride("research");
+                }
+                setBusy(false);
+              }
             }
           } catch (err) {
             stopPoll();
@@ -480,6 +593,7 @@ export function useCompassLive() {
       campaign,
       liveCandidates,
       loadCandidates,
+      loadDrafts,
       loadFacts,
       push,
       researchMode,
@@ -896,6 +1010,12 @@ export function useCompassLive() {
       const stage = stageOverride || "home";
       const lower = t.toLowerCase();
 
+      if (/^(go\s+)?back$|^previous(\s+step)?$/.test(lower)) {
+        push(user(t));
+        await goBackRef.current?.();
+        return;
+      }
+
       if (pendingNl && (lower === "yes" || lower === "confirm" || lower === "apply")) {
         try {
           const result = await api.applyNlOp(campaign.id, pendingNl.instruction);
@@ -994,7 +1114,87 @@ export function useCompassLive() {
     setStrategyNotes("");
   }, [applyLiveAccountDefaults, mailboxAccounts, stopPoll]);
 
+  const goBack = useCallback(async () => {
+    const current = stageOverride || "home";
+    if (current === "home") return;
+
+    const hadClarifying =
+      (campaign?.clarification_round ?? 0) > 0 ||
+      campaign?.status === "clarifying" ||
+      campaign?.status === "draft";
+    const externalProgress =
+      current === "progress" &&
+      (campaign?.status === "external_research" ||
+        (researchProgress || "").toLowerCase().includes("external"));
+
+    let target = previousStage(current, { hadClarifying, externalProgress });
+    // If drafts were generated without public facts, skip the empty research gate.
+    if (
+      current === "drafts" &&
+      target === "research" &&
+      !liveResearch.some((r) => r.facts.length > 0)
+    ) {
+      target = "confirm";
+    }
+    if (!target) return;
+
+    if (current === "progress") {
+      stopPoll();
+      setBusy(false);
+      setResearchProgress("");
+    }
+
+    if (target === "home") {
+      reset();
+      push(agent("Back at the start — set a new objective anytime."));
+      return;
+    }
+
+    setStageOverride(target);
+
+    if (campaign) {
+      try {
+        if (
+          ["cards", "confirm", "research", "drafts", "sendAcct", "review", "tracking"].includes(
+            target,
+          )
+        ) {
+          const cands = await loadCandidates(campaign.id);
+          if (["research", "drafts", "sendAcct", "review", "tracking"].includes(target)) {
+            await loadFacts(campaign.id, cands);
+          }
+          if (["drafts", "sendAcct", "review", "tracking"].includes(target)) {
+            await loadDrafts(campaign.id);
+          }
+          if (target === "tracking") {
+            await loadTracking(campaign.id);
+          }
+        }
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Could not reload previous step");
+      }
+    }
+
+    push(agent(`Stepped back to ${STAGE_LABELS[target]}.`));
+  }, [
+    campaign,
+    liveResearch,
+    loadCandidates,
+    loadDrafts,
+    loadFacts,
+    loadTracking,
+    push,
+    researchProgress,
+    reset,
+    showToast,
+    stageOverride,
+    stopPoll,
+  ]);
+
+  goBackRef.current = goBack;
+
   const stage: CompassStage = stageOverride || "home";
+  const canGoBack = stage !== "home";
   const approvedIds = useMemo(
     () => liveCandidates.filter((c) => decisions[c.id] === "include").map((c) => c.id),
     [liveCandidates, decisions],
@@ -1069,6 +1269,7 @@ export function useCompassLive() {
     setDecision,
     expandedEvidence,
     toggleEvidence,
+    suppressThread,
     factDecisions,
     setFact,
     draftStatuses,
@@ -1097,6 +1298,7 @@ export function useCompassLive() {
     startCampaign,
     advanceFromClarify,
     approvePlan,
+    reviseCandidateLimit,
     finishCards,
     batchApproveHighConfidence,
     confirmCampaign,
@@ -1126,6 +1328,8 @@ export function useCompassLive() {
     campaignList,
     handleNl,
     reset,
+    goBack,
+    canGoBack,
     formatRoleSummary: () => {
       const roles: Record<string, number> = {};
       for (const c of liveCandidates) {

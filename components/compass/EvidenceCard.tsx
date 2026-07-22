@@ -8,6 +8,7 @@ type Props = {
   evidenceOpen: boolean;
   onDecision: (d: ContactDecision) => void;
   onToggleEvidence: () => void;
+  onIgnoreThread?: (subject: string, evidenceId?: string) => void;
 };
 
 function StrengthDots({ n }: { n: number }) {
@@ -28,6 +29,7 @@ export function EvidenceCard({
   evidenceOpen,
   onDecision,
   onToggleEvidence,
+  onIgnoreThread,
 }: Props) {
   return (
     <article
@@ -75,7 +77,7 @@ export function EvidenceCard({
       {evidenceOpen ? (
         <ul className="compass-evidence-list">
           {candidate.evidence.map((e, i) => (
-            <li key={i}>
+            <li key={e.id || i}>
               <span className="compass-badge">{e.mailbox}</span> {e.date} · {e.direction} ·{" "}
               <em>{e.subject}</em> — {e.summary}{" "}
               {e.outlookWeblink ? (
@@ -85,6 +87,19 @@ export function EvidenceCard({
               ) : (
                 <span className="compass-muted">No link</span>
               )}
+              {onIgnoreThread ? (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    className="compass-text-link"
+                    title="Exclude this thread from hooks and strength"
+                    onClick={() => onIgnoreThread(e.subject, e.id)}
+                  >
+                    Ignore thread
+                  </button>
+                </>
+              ) : null}
             </li>
           ))}
         </ul>

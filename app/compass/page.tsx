@@ -42,16 +42,18 @@ function CompassApp() {
   const compass = useCompassLive();
 
   return (
-    <div className="compass-page">
+    <div className={`compass-page${compass.stage === "home" ? " is-home" : ""}`}>
       <CompassNav
         showLegacyLink
         onStub={(label) => compass.showToast(`${label} — coming in a later phase`)}
         onCampaigns={() => compass.openCampaignsList()}
       />
       {compass.toast ? <div className="compass-toast">{compass.toast}</div> : null}
-      <p className="compass-live-banner subtitle" style={{ padding: "0 1.25rem", margin: 0 }}>
-        Live campaigns — candidates, drafts, and sends come from your synced mailboxes.
-      </p>
+      {compass.stage !== "home" ? (
+        <p className="compass-live-banner subtitle">
+          Live campaigns — candidates, drafts, and sends come from your synced mailboxes.
+        </p>
+      ) : null}
 
       {compass.stage === "home" ? (
         <CompassHome

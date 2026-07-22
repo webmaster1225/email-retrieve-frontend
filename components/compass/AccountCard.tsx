@@ -9,6 +9,7 @@ type Props = {
   onDetails?: () => void;
   liveStatus?: string;
   connected?: boolean;
+  compact?: boolean;
 };
 
 export function AccountCard({
@@ -18,14 +19,55 @@ export function AccountCard({
   onDetails,
   liveStatus,
   connected,
+  compact = false,
 }: Props) {
   const statusLine = liveStatus
     ? liveStatus
     : account.recruiting && !included
-      ? "recruiting mailbox - off by default"
+      ? "Recruiting — off by default"
       : included
-        ? `Connected · ${account.synced}`
-        : "Connected";
+        ? `Included · ${account.synced}`
+        : connected === false
+          ? "Not connected"
+          : "Connected";
+
+  if (compact) {
+    return (
+      <div
+        className={`compass-account-card compass-account-card--compact${
+          included ? " is-included" : ""
+        }${account.recruiting ? " is-recruiting" : ""}${
+          connected === false ? " is-offline" : ""
+        }`}
+      >
+        <div className="compass-account-compact-main">
+          <span
+            className={`compass-account-indicator${included ? " is-on" : ""}`}
+            aria-hidden
+          />
+          <div className="compass-account-compact-text">
+            <strong className="compass-account-name">{account.name}</strong>
+            <span className="compass-account-email">&lt;{account.email}&gt;</span>
+            <span
+              className={`compass-account-synced${
+                connected === false ? " compass-warn" : ""
+              }`}
+            >
+              {statusLine}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          className={`button small${included ? " primary" : ""}`}
+          onClick={onToggle}
+          disabled={connected === false}
+        >
+          {included ? "Included" : "Include"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div

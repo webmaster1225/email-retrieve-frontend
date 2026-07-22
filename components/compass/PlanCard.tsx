@@ -1,14 +1,24 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { PlanView } from "@/lib/compass/types";
 
 type Props = {
   onApprove: () => void;
+  onCandidateLimitChange?: (limit: number) => void;
   plan: PlanView | null;
   busy?: boolean;
 };
 
-export function PlanCard({ onApprove, plan, busy }: Props) {
+export function PlanCard({ onApprove, onCandidateLimitChange, plan, busy }: Props) {
+  const [limitDraft, setLimitDraft] = useState<string>("30");
+
+  useEffect(() => {
+    if (plan?.candidateLimit != null) {
+      setLimitDraft(String(plan.candidateLimit));
+    }
+  }, [plan?.candidateLimit]);
+
   if (!plan) {
     return (
       <div className="compass-work-block">
@@ -17,6 +27,20 @@ export function PlanCard({ onApprove, plan, busy }: Props) {
       </div>
     );
   }
+
+  const commitLimit = () => {
+    if (!onCandidateLimitChange) return;
+    const n = Number.parseInt(limitDraft, 10);
+    if (!Number.isFinite(n)) {
+      setLimitDraft(String(plan.candidateLimit));
+      return;
+    }
+    const clamped = Math.max(5, Math.min(100, n));
+    setLimitDraft(String(clamped));
+    if (clamped !== plan.candidateLimit) {
+      onCandidateLimitChange(clamped);
+    }
+  };
 
   return (
     <div className="compass-work-block">
@@ -41,6 +65,30 @@ export function PlanCard({ onApprove, plan, busy }: Props) {
         <div className="compass-plan-row">
           <span className="compass-plan-key">Prioritize</span>
           <span>{plan.prioritize}</span>
+        </div>
+        <div className="compass-plan-row">
+          <span className="compass-plan-key">Top candidates</span>
+          <span className="compass-plan-limit">
+            <input
+              type="number"
+              min={5}
+              max={100}
+              step={1}
+              className="compass-plan-limit-input"
+              value={limitDraft}
+              disabled={busy || !onCandidateLimitChange}
+              aria-label="Number of top-ranked candidates to surface"
+              onChange={(e) => setLimitDraft(e.target.value)}
+              onBlur={commitLimit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+            />
+            <span className="compass-muted"> people (5–100)</span>
+          </span>
         </div>
         <div className="compass-plan-row">
           <span className="compass-plan-key">Exclude</span>
