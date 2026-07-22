@@ -85,6 +85,7 @@ export function CampaignWorkspace({ compass }: Props) {
     formatRoleSummary,
     planView,
     researchProgress,
+    draftProgress,
     busy,
     candidatesForCards,
     personNameFor,
@@ -164,16 +165,32 @@ export function CampaignWorkspace({ compass }: Props) {
       />
     );
   } else if (stage === "progress") {
+    const isDrafting = draftProgress !== null;
+    const pct =
+      draftProgress && draftProgress.total > 0
+        ? Math.round((draftProgress.done / draftProgress.total) * 100)
+        : null;
     work = (
       <div className="compass-work-block compass-progress">
         <h2 className="compass-work-title">
-          {researchProgress?.toLowerCase().includes("external")
-            ? "External research…"
-            : "Reviewing relationships…"}
+          {isDrafting
+            ? "Drafting messages…"
+            : researchProgress?.toLowerCase().includes("external")
+              ? "External research…"
+              : "Reviewing relationships…"}
         </h2>
         <div className="compass-progress-bar-track">
-          <div className="compass-progress-bar-fill" />
+          <div
+            className={`compass-progress-bar-fill${pct === null ? "" : " is-determinate"}`}
+            style={pct === null ? undefined : { width: `${pct}%` }}
+          />
         </div>
+        {draftProgress && draftProgress.total > 0 ? (
+          <p className="compass-progress-count">
+            {draftProgress.done} / {draftProgress.total} drafts
+            {pct !== null ? ` · ${pct}%` : ""}
+          </p>
+        ) : null}
         <p className="compass-muted">
           {researchProgress ||
             "Reviewing relationship history… narrowing to the strongest candidates."}

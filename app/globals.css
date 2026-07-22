@@ -2960,6 +2960,20 @@ a.button[aria-disabled="true"] {
   animation: compass-indeterminate 1.2s ease infinite;
 }
 
+.compass-progress-bar-fill.is-determinate {
+  width: 0;
+  animation: none;
+  transition: width 0.4s ease;
+}
+
+.compass-progress-count {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes compass-indeterminate {
   0% { transform: translateX(-60%); }
   100% { transform: translateX(220%); }

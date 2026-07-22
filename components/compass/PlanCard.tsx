@@ -11,7 +11,7 @@ type Props = {
 };
 
 export function PlanCard({ onApprove, onCandidateLimitChange, plan, busy }: Props) {
-  const [limitDraft, setLimitDraft] = useState<string>("30");
+  const [limitDraft, setLimitDraft] = useState<string>("5");
 
   useEffect(() => {
     if (plan?.candidateLimit != null) {

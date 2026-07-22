@@ -96,6 +96,9 @@ export function useCompassLive() {
   const [liveCandidates, setLiveCandidates] = useState<CampaignCandidateView[]>([]);
   const [planView, setPlanView] = useState<PlanView | null>(null);
   const [researchProgress, setResearchProgress] = useState("");
+  const [draftProgress, setDraftProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [stageOverride, setStageOverride] = useState<CompassStage | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -506,6 +509,63 @@ export function useCompassLive() {
     }
   }, [campaign, liveCandidates, push, showToast]);
 
+  const runDraftGeneration = useCallback(async () => {
+    if (!campaign) return;
+    setBusy(true);
+    setStageOverride("progress");
+    setResearchProgress("Drafting personalized messages…");
+    try {
+      const started = await api.startCampaignDrafts(campaign.id);
+      setDraftProgress({ done: started.done || 0, total: started.total || 0 });
+      setResearchProgress(
+        started.total
+          ? `Generated 0 of ${started.total} drafts…`
+          : started.progress || "Drafting…",
+      );
+      stopPoll();
+      pollRef.current = setInterval(async () => {
+        try {
+          const st = await api.campaignDraftStatus(campaign.id);
+          setDraftProgress({ done: st.done || 0, total: st.total || 0 });
+          setResearchProgress(
+            st.total
+              ? `Generated ${st.done} of ${st.total} drafts…`
+              : st.progress || "Drafting…",
+          );
+          if (st.status === "completed") {
+            stopPoll();
+            await loadDrafts(campaign.id);
+            setDraftProgress(null);
+            push(
+              agent(
+                "Drafts ready (Gate 4). Approve or edit, then confirm the sending account.",
+              ),
+            );
+            setStageOverride("drafts");
+            setBusy(false);
+          } else if (st.status === "failed") {
+            stopPoll();
+            setDraftProgress(null);
+            showToast(st.progress || "Draft generation failed");
+            setStageOverride("research");
+            setBusy(false);
+          }
+        } catch (err) {
+          stopPoll();
+          setDraftProgress(null);
+          showToast(err instanceof Error ? err.message : "Draft status failed");
+          setBusy(false);
+        }
+      }, 800);
+    } catch (e) {
+      stopPoll();
+      setDraftProgress(null);
+      showToast(e instanceof Error ? e.message : "Draft generation failed");
+      setStageOverride("research");
+      setBusy(false);
+    }
+  }, [campaign, loadDrafts, push, showToast, stopPoll]);
+
   const confirmCampaign = useCallback(
     async (notes: string) => {
       if (!campaign) return;
@@ -559,23 +619,7 @@ export function useCompassLive() {
                     "No public facts to review — drafting personalized messages from your recent conversations…",
                   ),
                 );
-                setResearchProgress("Drafting personalized messages…");
-                try {
-                  await api.generateCampaignDrafts(campaign.id);
-                  await loadDrafts(campaign.id);
-                  push(
-                    agent(
-                      "Drafts ready (Gate 4). Approve or edit, then confirm the sending account.",
-                    ),
-                  );
-                  setStageOverride("drafts");
-                } catch (genErr) {
-                  showToast(
-                    genErr instanceof Error ? genErr.message : "Draft generation failed",
-                  );
-                  setStageOverride("research");
-                }
-                setBusy(false);
+                await runDraftGeneration();
               }
             }
           } catch (err) {
@@ -593,10 +637,10 @@ export function useCompassLive() {
       campaign,
       liveCandidates,
       loadCandidates,
-      loadDrafts,
       loadFacts,
       push,
       researchMode,
+      runDraftGeneration,
       showToast,
       stopPoll,
       strategyNotes,
@@ -630,19 +674,9 @@ export function useCompassLive() {
 
   const finishResearch = useCallback(async () => {
     if (!campaign) return;
-    setBusy(true);
-    try {
-      push(agent("Drafting personalized messages…"));
-      await api.generateCampaignDrafts(campaign.id);
-      await loadDrafts(campaign.id);
-      push(agent("Drafts ready (Gate 4). Approve or edit, then confirm the sending account."));
-      setStageOverride("drafts");
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Draft generation failed");
-    } finally {
-      setBusy(false);
-    }
-  }, [campaign, loadDrafts, push, showToast]);
+    push(agent("Drafting personalized messages…"));
+    await runDraftGeneration();
+  }, [campaign, push, runDraftGeneration]);
 
   const setDraftStatus = useCallback(
     async (candidateId: string, s: DraftStatus) => {
@@ -1119,6 +1153,7 @@ export function useCompassLive() {
     setLiveCandidates([]);
     setPlanView(null);
     setResearchProgress("");
+    setDraftProgress(null);
     setPendingNl(null);
     setStageOverride(null);
     setMessages([]);
@@ -1377,6 +1412,7 @@ export function useCompassLive() {
     },
     planView,
     researchProgress,
+    draftProgress,
     busy,
     candidatesForCards: liveCandidates,
     campaignId: campaign?.id ?? null,

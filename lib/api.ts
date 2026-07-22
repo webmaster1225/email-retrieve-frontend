@@ -603,6 +603,15 @@ export const api = {
     apiFetch<{ items: CampaignDraftOut[] }>(`/campaigns/${id}/drafts/generate`, {
       method: "POST",
     }),
+  startCampaignDrafts: (id: string) =>
+    apiFetch<{ status: string; done: number; total: number; progress?: string }>(
+      `/campaigns/${id}/drafts/generate/start`,
+      { method: "POST" },
+    ),
+  campaignDraftStatus: (id: string) =>
+    apiFetch<{ status: string; done: number; total: number; progress?: string }>(
+      `/campaigns/${id}/drafts/generate/status`,
+    ),
   listCampaignDrafts: (id: string) =>
     apiFetch<CampaignDraftOut[]>(`/campaigns/${id}/drafts`),
   patchCampaignDraft: (id: string, draftId: string, data: { subject?: string; body?: string }) =>

@@ -76,7 +76,7 @@ export function planToFixture(campaign: CampaignOut): PlanView {
     assumption: assumptions || "Defaults applied where you didn't specify",
     candidateLimit: Math.max(
       5,
-      Math.min(100, Number(p.candidate_limit) || 30),
+      Math.min(100, Number(p.candidate_limit) || 5),
     ),
   };
 }
